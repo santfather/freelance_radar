@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>🎯 Freelance Radar</title>
+<style>
+  :root {
+    --bg: #0f1117; --surface: #1a1d27; --border: #2a2d3a;
+    --text: #e2e8f0; --text-muted: #94a3b8;
+    --take: #22c55e; --skip: #ef4444; --unknown: #f59e0b;
+    --accent: #6366f1; --accent2: #8b5cf6;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: system-ui, sans-serif; min-height: 100vh; }
+
+  header {
+    background: var(--surface); border-bottom: 1px solid var(--border);
+    padding: 16px 24px; display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+  }
+  header h1 { font-size: 20px; font-weight: 700; }
+  header h1 span { color: var(--accent); }
+
+  .stats { display: flex; gap: 20px; flex-wrap: wrap; margin-left: auto; }
+  .stat { text-align: center; }
+  .stat .val { font-size: 22px; font-weight: 700; color: var(--accent); }
+  .stat .lbl { font-size: 11px; color: var(--text-muted); text-transform: uppercase; }
+
+  .toolbar {
+    padding: 12px 24px; display: flex; gap: 12px; flex-wrap: wrap;
+    align-items: center; border-bottom: 1px solid var(--border);
+  }
+  button.refresh {
+    background: var(--accent); color: #fff; border: none; border-radius: 8px;
+    padding: 9px 20px; font-size: 14px; font-weight: 600; cursor: pointer;
+    transition: opacity .2s;
+  }
+  button.refresh:hover { opacity: .85; }
+  button.refresh:disabled { opacity: .4; cursor: not-allowed; }
+
+  select, .filter-btn {
+    background: var(--surface); color: var(--text); border: 1px solid var(--border);
+    border-radius: 8px; padding: 8px 14px; font-size: 13px; cursor: pointer;
+  }
+  .filter-btn { display: inline-flex; gap: 6px; }
+  .filter-btn.active { border-color: var(--accent); color: var(--accent); }
+
+  .log-box {
+    margin: 0 24px 0; background: #0a0c14; border: 1px solid var(--border);
+    border-radius: 8px; padding: 10px 14px; font-size: 12px; font-family: monospace;
+    color: var(--text-muted); max-height: 0; overflow: hidden; transition: max-height .3s;
+  }
+  .log-box.visible { max-height: 160px; margin-bottom: 12px; }
+
+  .content { padding: 24px; }
+
+  .category-section { margin-bottom: 32px; }
+  .category-title {
+    font-size: 14px; font-weight: 600; color: var(--text-muted);
+    text-transform: uppercase; letter-spacing: .05em;
+    margin-bottom: 12px; display: flex; align-items: center; gap: 8px;
+  }
+  .category-title .cnt {
+    background: var(--border); border-radius: 999px; padding: 2px 8px;
+    font-size: 11px; color: var(--text-muted);
+  }
+
+  .job-grid { display: grid; gap: 12px; }
+
+  .job-card {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+    padding: 16px; transition: border-color .2s;
+  }
+  .job-card:hover { border-color: var(--accent); }
+  .job-card.take { border-left: 3px solid var(--take); }
+  .job-card.skip { border-left: 3px solid var(--skip); }
+  .job-card.unknown { border-left: 3px solid var(--unknown); }
+
+  .job-header { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 8px; }
+  .verdict-badge {
+    flex-shrink: 0; padding: 3px 10px; border-radius: 999px;
+    font-size: 11px; font-weight: 700; letter-spacing: .05em;
+  }
+  .verdict-badge.TAKE { background: rgba(34,197,94,.15); color: var(--take); }
+  .verdict-badge.SKIP { background: rgba(239,68,68,.15); color: var(--skip); }
+  .verdict-badge.UNKNOWN { background: rgba(245,158,11,.12); color: var(--unknown); }
+
+  .job-title { font-size: 15px; font-weight: 600; line-height: 1.4; }
+  .job-title a { color: inherit; text-decoration: none; }
+  .job-title a:hover { color: var(--accent); }
+
+  .job-meta { display: flex; flex-wrap: wrap; gap: 12px; margin: 8px 0; font-size: 12px; color: var(--text-muted); }
+  .meta-item { display: flex; align-items: center; gap: 4px; }
+
+  .job-desc {
+    font-size: 13px; color: var(--text-muted); line-height: 1.55;
+    margin: 6px 0 4px; display: -webkit-box;
+    -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+  }
+
+  .job-reason {
+    font-size: 13px; color: var(--text-muted); line-height: 1.5;
+    border-top: 1px solid var(--border); padding-top: 8px; margin-top: 8px;
+  }
+
+  .complexity-dots { display: flex; gap: 3px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--border); }
+  .dot.on { background: var(--accent2); }
+
+  .empty { color: var(--text-muted); text-align: center; padding: 60px; font-size: 15px; }
+
+  .ollama-status {
+    padding: 6px 14px; border-radius: 8px; font-size: 12px; margin-left: auto;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .ollama-status.ok { background: rgba(34,197,94,.1); color: var(--take); }
+  .ollama-status.err { background: rgba(239,68,68,.1); color: var(--skip); }
+
+  @media (min-width: 900px) {
+    .job-grid { grid-template-columns: 1fr 1fr; }
+  }
+  @media (min-width: 1400px) {
+    .job-grid { grid-template-columns: 1fr 1fr 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>🎯 Freelance <span>Radar</span></h1>
+  <div class="stats">
+    <div class="stat"><div class="val" id="stat-total">—</div><div class="lbl">Всего</div></div>
+    <div class="stat"><div class="val" id="stat-analyzed">—</div><div class="lbl">Проанализировано</div></div>
+    <div class="stat"><div class="val" style="color:var(--take)" id="stat-take">—</div><div class="lbl">БРАТЬ</div></div>
+  </div>
+  <div id="ollama-status" class="ollama-status">⏳ Проверка Ollama...</div>
+</header>
+
+<div class="toolbar">
+  <button class="refresh" id="btn-refresh" onclick="startRefresh()">🔄 Обновить заказы</button>
+
+  <select id="filter-verdict" onchange="loadJobs()">
+    <option value="all">Все вердикты</option>
+    <option value="take">✅ БРАТЬ</option>
+    <option value="skip">❌ Пропустить</option>
+    <option value="unknown">⏳ Не проанализировано</option>
+  </select>
+
+  <select id="filter-category" onchange="loadJobs()">
+    <option value="all">Все категории</option>
+    <option value="Web App">🌐 Web App</option>
+    <option value="Mobile App">📱 Mobile App</option>
+    <option value="CMS / WordPress">🔧 CMS / WordPress</option>
+    <option value="Other IT">💻 Other IT</option>
+  </select>
+
+  <button class="filter-btn" onclick="toggleLog()">📋 Лог</button>
+</div>
+
+<div id="log-box" class="log-box"></div>
+
+<div class="content" id="content">
+  <div class="empty">Нажми «Обновить заказы» чтобы запустить парсинг</div>
+</div>
+
+<script>
+const CATEGORIES = ["Web App", "Mobile App", "CMS / WordPress", "Other IT"];
+const CAT_ICONS = { "Web App": "🌐", "Mobile App": "📱", "CMS / WordPress": "🔧", "Other IT": "💻" };
+let logVisible = false;
+let pollInterval = null;
+
+async function loadStats() {
+  const r = await fetch('/api/stats').then(r => r.json());
+  document.getElementById('stat-total').textContent = r.total ?? '—';
+  document.getElementById('stat-analyzed').textContent = r.analyzed ?? '—';
+  document.getElementById('stat-take').textContent = r.take ?? '—';
+
+  const ollamaEl = document.getElementById('ollama-status');
+  if (r.ollama_ok) {
+    ollamaEl.className = 'ollama-status ok';
+    ollamaEl.textContent = '🟢 ' + (r.ollama_msg || 'Ollama OK');
+  } else {
+    ollamaEl.className = 'ollama-status err';
+    ollamaEl.textContent = '🔴 ' + (r.ollama_msg || 'Ollama недоступен');
+  }
+
+  if (r.log && r.log.length) {
+    document.getElementById('log-box').innerHTML = r.log.map(l => `<div>${l}</div>`).join('');
+  }
+
+  if (r.scraping) {
+    document.getElementById('btn-refresh').disabled = true;
+    document.getElementById('btn-refresh').textContent = '⏳ Парсинг...';
+    if (!pollInterval) {
+      pollInterval = setInterval(async () => {
+        const s = await fetch('/api/stats').then(r => r.json());
+        if (!s.scraping) {
+          clearInterval(pollInterval); pollInterval = null;
+          document.getElementById('btn-refresh').disabled = false;
+          document.getElementById('btn-refresh').textContent = '🔄 Обновить заказы';
+          await loadStats();
+          await loadJobs();
+        } else {
+          if (s.log) document.getElementById('log-box').innerHTML = s.log.map(l => `<div>${l}</div>`).join('');
+        }
+      }, 2000);
+    }
+  }
+  return r;
+}
+
+async function loadJobs() {
+  const verdict = document.getElementById('filter-verdict').value;
+  const category = document.getElementById('filter-category').value;
+  const jobs = await fetch(`/api/jobs?verdict=${verdict}&category=${encodeURIComponent(category)}`).then(r => r.json());
+
+  const content = document.getElementById('content');
+  if (!jobs.length) {
+    content.innerHTML = '<div class="empty">Нет заказов по выбранным фильтрам</div>';
+    return;
+  }
+
+  // Group by category
+  const byCategory = {};
+  CATEGORIES.forEach(c => byCategory[c] = []);
+  jobs.forEach(j => {
+    const cat = j.category || 'Other IT';
+    if (!byCategory[cat]) byCategory[cat] = [];
+    byCategory[cat].push(j);
+  });
+
+  let html = '';
+  for (const cat of CATEGORIES) {
+    const list = byCategory[cat];
+    if (!list.length) continue;
+    html += `<div class="category-section">
+      <div class="category-title">${CAT_ICONS[cat] || '📁'} ${cat} <span class="cnt">${list.length}</span></div>
+      <div class="job-grid">`;
+    for (const job of list) {
+      html += renderCard(job);
+    }
+    html += `</div></div>`;
+  }
+  content.innerHTML = html;
+}
+
+function renderCard(job) {
+  const v = job.verdict || 'UNKNOWN';
+  const cls = v === 'TAKE' ? 'take' : v === 'SKIP' ? 'skip' : 'unknown';
+  const badge = v === 'TAKE' ? '✅ БРАТЬ' : v === 'SKIP' ? '❌ Пропустить' : '⏳ Анализ...';
+  const complexity = job.complexity || 0;
+  const dots = Array.from({length: 5}, (_, i) =>
+    `<div class="dot${i < complexity ? ' on' : ''}"></div>`
+  ).join('');
+
+  const budget = job.budget_raw ? `💰 ${job.budget_raw}` : '';
+  const hours = job.estimated_hours ? `⏱ ~${job.estimated_hours}h` : '';
+  const source = job.source ? `📌 ${job.source}` : '';
+  const posted = job.posted_at ? `🕐 ${job.posted_at}` : '';
+
+  const descPreview = job.description
+    ? escHtml(job.description.slice(0, 180)) + (job.description.length > 180 ? '…' : '')
+    : '';
+
+  return `<div class="job-card ${cls}">
+    <div class="job-header">
+      <span class="verdict-badge ${v}">${badge}</span>
+      <div class="job-title"><a href="${job.url}" target="_blank">${escHtml(job.title)}</a></div>
+    </div>
+    ${descPreview ? `<div class="job-desc">${descPreview}</div>` : ''}
+    <div class="job-meta">
+      ${budget ? `<span class="meta-item">${escHtml(budget)}</span>` : ''}
+      ${hours ? `<span class="meta-item">${hours}</span>` : ''}
+      ${complexity ? `<span class="meta-item">Сложность <div class="complexity-dots">${dots}</div></span>` : ''}
+      ${source ? `<span class="meta-item">${escHtml(source)}</span>` : ''}
+      ${posted ? `<span class="meta-item">${escHtml(posted)}</span>` : ''}
+    </div>
+    ${job.verdict_reason ? `<div class="job-reason">💬 ${escHtml(job.verdict_reason)}</div>` : ''}
+  </div>`;
+}
+
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+async function startRefresh() {
+  const btn = document.getElementById('btn-refresh');
+  btn.disabled = true;
+  btn.textContent = '⏳ Парсинг...';
+  document.getElementById('log-box').classList.add('visible');
+  logVisible = true;
+
+  await fetch('/api/refresh', {method: 'POST'});
+
+  // Poll until done — regardless of race with loadStats
+  if (pollInterval) clearInterval(pollInterval);
+  pollInterval = setInterval(async () => {
+    const s = await fetch('/api/stats').then(r => r.json()).catch(() => ({}));
+    if (s.log) document.getElementById('log-box').innerHTML = s.log.map(l => `<div>${escHtml(l)}</div>`).join('');
+    document.getElementById('stat-total').textContent = s.total ?? '—';
+    document.getElementById('stat-analyzed').textContent = s.analyzed ?? '—';
+    document.getElementById('stat-take').textContent = s.take ?? '—';
+    if (!s.scraping) {
+      clearInterval(pollInterval); pollInterval = null;
+      btn.disabled = false;
+      btn.textContent = '🔄 Обновить заказы';
+      await loadJobs();
+    }
+  }, 1500);
+}
+
+function toggleLog() {
+  logVisible = !logVisible;
+  document.getElementById('log-box').classList.toggle('visible', logVisible);
+}
+
+// Init
+(async () => {
+  await loadStats();
+  await loadJobs();
+})();
+</script>
+</body>
+</html>
