@@ -300,10 +300,3 @@ def get_analyzer(provider: str) -> BaseAnalyzer:
     return cls[0]()
 
 
-async def check_provider_available(provider: str) -> tuple[bool, str]:
-    """Проверить доступность провайдера."""
-    provider = provider.lower()
-    entry = PROVIDER_MAP.get(provider)
-    if entry is None:
-        return False, f"Unknown provider '{provider}'"
-    return await entry[1]()

@@ -11,7 +11,7 @@ from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, BackgroundTasks, Depends, Query, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 
 load_dotenv()
 
@@ -43,6 +43,7 @@ from database import (
     reset_all_analysis,
 )
 from scrapers import ALL_SCRAPERS
+from models import SettingsUpdate
 from services.state import AppState
 
 
@@ -184,6 +185,11 @@ async def index():
         return f.read()
 
 
+@app.get("/static/{path:path}")
+async def static_files(path: str):
+    return FileResponse(f"static/{path}")
+
+
 @app.post("/api/refresh")
 async def refresh(
     background_tasks: BackgroundTasks,
@@ -315,15 +321,14 @@ async def settings_get():
 
 
 @app.post("/api/settings")
-async def settings_post(data: dict):
+async def settings_post(data: SettingsUpdate):
     """Обновить настройки."""
-    if "provider" in data:
-        provider = data["provider"].lower()
+    if data.provider:
+        provider = data.provider.lower()
         if provider not in ("ollama", "deepseek", "gemini"):
             return JSONResponse(
                 {"status": "error", "message": f"Unknown provider '{provider}'"},
                 status_code=400,
             )
         await set_setting("llm_provider", provider)
-    # Можно добавить другие настройки
     return JSONResponse({"status": "ok"})

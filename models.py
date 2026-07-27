@@ -1,6 +1,7 @@
 from dataclasses import dataclass, field
 from typing import Optional
 from enum import Enum
+from pydantic import BaseModel
 
 
 class Category(str, Enum):
@@ -53,3 +54,7 @@ class Job:
             "estimated_hours": self.estimated_hours,
             "analyzed": self.analyzed,
         }
+
+
+class SettingsUpdate(BaseModel):
+    provider: str | None = None

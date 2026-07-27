@@ -1,0 +1,96 @@
+:root {
+  --bg: #0f1117; --surface: #1a1d27; --border: #2a2d3a;
+  --text: #e2e8f0; --text-muted: #94a3b8;
+  --take: #22c55e; --skip: #ef4444; --unknown: #f59e0b;
+  --accent: #6366f1; --accent2: #8b5cf6;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: var(--bg); color: var(--text); font-family: system-ui, sans-serif; min-height: 100vh; }
+
+header {
+  background: var(--surface); border-bottom: 1px solid var(--border);
+  padding: 16px 24px; display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+}
+header h1 { font-size: 20px; font-weight: 700; }
+header h1 span { color: var(--accent); }
+
+.stats { display: flex; gap: 20px; flex-wrap: wrap; margin-left: auto; }
+.stat { text-align: center; }
+.stat .val { font-size: 22px; font-weight: 700; color: var(--accent); }
+.stat .lbl { font-size: 11px; color: var(--text-muted); text-transform: uppercase; }
+
+.toolbar {
+  padding: 12px 24px; display: flex; gap: 10px; flex-wrap: wrap;
+  align-items: center; border-bottom: 1px solid var(--border);
+}
+.btn {
+  background: var(--accent); color: #fff; border: none; border-radius: 8px;
+  padding: 9px 18px; font-size: 13px; font-weight: 600; cursor: pointer;
+  transition: opacity .2s; white-space: nowrap;
+}
+.btn:hover { opacity: .85; }
+.btn:disabled { opacity: .4; cursor: not-allowed; }
+.btn-outline {
+  background: transparent; border: 1px solid var(--border); color: var(--text);
+}
+.btn-outline:hover { border-color: var(--accent); }
+.btn-analyze { background: #7c3aed; }
+.btn-icon {
+  background: var(--surface); border: 1px solid var(--border); color: var(--text-muted);
+  border-radius: 8px; padding: 8px 10px; font-size: 15px; cursor: pointer; line-height: 1;
+  transition: border-color .2s, color .2s;
+}
+.btn-icon:hover { border-color: var(--accent); color: var(--text); }
+.btn-icon.active { border-color: var(--accent); color: var(--accent); background: rgba(99,102,241,.1); }
+
+select, .filter-btn {
+  background: var(--surface); color: var(--text); border: 1px solid var(--border);
+  border-radius: 8px; padding: 8px 14px; font-size: 13px; cursor: pointer;
+}
+.filter-btn { display: inline-flex; gap: 6px; }
+.filter-btn.active { border-color: var(--accent); color: var(--accent); }
+
+.log-box {
+  margin: 0 24px 0; background: #0a0c14; border: 1px solid var(--border);
+  border-radius: 8px; padding: 10px 14px; font-size: 12px; font-family: monospace;
+  color: var(--text-muted); max-height: 0; overflow: hidden; transition: max-height .3s;
+}
+.log-box.visible { max-height: 200px; margin-bottom: 12px; overflow-y: auto; }
+
+.content { padding: 24px; }
+
+.category-section { margin-bottom: 32px; }
+.category-title {
+  font-size: 14px; font-weight: 600; color: var(--text-muted);
+  text-transform: uppercase; letter-spacing: .05em;
+  margin-bottom: 12px; display: flex; align-items: center; gap: 8px;
+}
+.category-title .cnt {
+  background: var(--border); border-radius: 999px; padding: 2px 8px;
+  font-size: 11px; color: var(--text-muted);
+}
+
+.job-grid { display: grid; gap: 12px; }
+
+/* List layout */
+.job-grid.list-layout { grid-template-columns: 1fr !important; gap: 8px; }
+.job-grid.list-layout .job-card {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 10px 16px;
+}
+.job-grid.list-layout .job-card .job-header { margin-bottom: 0; flex-shrink: 0; width: auto; }
+.job-grid.list-layout .job-card .job-desc { display: none; }
+.job-grid.list-layout .job-card .job-reason { display: none; }
+.job-grid.list-layout .job-card .job-meta { flex: 1; margin: 0; min-width: 0; }
+.job-grid.list-layout .job-card .job-title a {
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 280px; display: inline-block; vertical-align: bottom;
+}
+.job-grid.list-layout .job-card .complexity-dots { display: none; }
+.job-grid.list-layout .job-card .meta-item { white-space: nowrap; }
+@media (max-width: 800px) {
+  .job-grid.list-layout .job-card .job-title a { max-width: 120px; }
+  .job-grid.list-layout .job-card { gap: 6px; }
+}
+
+/* Grid */
+@media (min-width: 900px) { .job-grid { grid-template-columns: 1fr 1fr; } }
+@media (min-width: 1400px) { .job-grid { grid-template-columns: 1fr 1fr 1fr; } }
