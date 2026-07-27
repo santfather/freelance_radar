@@ -100,9 +100,9 @@ def _extract_result(raw: str) -> dict:
 class OllamaAnalyzer(BaseAnalyzer):
     """Анализ через локальную Ollama (поддерживает /api/chat и /api/generate)."""
 
-    def __init__(self):
-        self.host = os.getenv("OLLAMA_HOST", "http://localhost:11434")
-        self.model = os.getenv("OLLAMA_MODEL", "mistral")
+    def __init__(self, model: str | None = None, host: str | None = None):
+        self.host = host or os.getenv("OLLAMA_HOST", "http://localhost:11434")
+        self.model = model or os.getenv("OLLAMA_MODEL", "mistral")
 
     async def analyze(self, title: str, category: str, budget: str, description: str) -> dict:
         prompt = self._build_prompt(title, category, budget, description)
@@ -148,10 +148,10 @@ class OllamaAnalyzer(BaseAnalyzer):
         return resp.json().get("response", "{}")
 
 
-async def check_ollama_available() -> tuple[bool, str]:
+async def check_ollama_available(model: str | None = None, host: str | None = None) -> tuple[bool, str]:
     """Проверить, доступна ли Ollama и нужная модель."""
-    host = os.getenv("OLLAMA_HOST", "http://localhost:11434")
-    model = os.getenv("OLLAMA_MODEL", "mistral")
+    host = host or os.getenv("OLLAMA_HOST", "http://localhost:11434")
+    model = model or os.getenv("OLLAMA_MODEL", "mistral")
     try:
         async with httpx.AsyncClient(timeout=5) as client:
             resp = await client.get(f"{host}/api/tags")
@@ -171,9 +171,9 @@ async def check_ollama_available() -> tuple[bool, str]:
 class DeepSeekAnalyzer(BaseAnalyzer):
     """Анализ через DeepSeek API (OpenAI-совместимый)."""
 
-    def __init__(self):
-        self.api_key = os.getenv("DEEPSEEK_API_KEY", "")
-        self.model = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
+    def __init__(self, api_key: str | None = None, model: str | None = None):
+        self.api_key = api_key or os.getenv("DEEPSEEK_API_KEY", "")
+        self.model = model or os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
         self.base_url = "https://api.deepseek.com/v1"
 
     async def analyze(self, title: str, category: str, budget: str, description: str) -> dict:
@@ -204,9 +204,9 @@ class DeepSeekAnalyzer(BaseAnalyzer):
             return self._error_result(f"DeepSeek error: {e}")
 
 
-async def check_deepseek_available() -> tuple[bool, str]:
+async def check_deepseek_available(api_key: str | None = None) -> tuple[bool, str]:
     """Проверить, настроен ли DeepSeek API."""
-    key = os.getenv("DEEPSEEK_API_KEY", "")
+    key = api_key or os.getenv("DEEPSEEK_API_KEY", "")
     if not key:
         return False, "DeepSeek API key not set"
     try:
@@ -226,9 +226,9 @@ async def check_deepseek_available() -> tuple[bool, str]:
 class GeminiAnalyzer(BaseAnalyzer):
     """Анализ через Google Gemini API."""
 
-    def __init__(self):
-        self.api_key = os.getenv("GEMINI_API_KEY", "")
-        self.model = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+    def __init__(self, api_key: str | None = None, model: str | None = None):
+        self.api_key = api_key or os.getenv("GEMINI_API_KEY", "")
+        self.model = model or os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 
     async def analyze(self, title: str, category: str, budget: str, description: str) -> dict:
         prompt = self._build_prompt(title, category, budget, description)
@@ -260,9 +260,9 @@ class GeminiAnalyzer(BaseAnalyzer):
             return self._error_result(f"Gemini error: {e}")
 
 
-async def check_gemini_available() -> tuple[bool, str]:
+async def check_gemini_available(api_key: str | None = None) -> tuple[bool, str]:
     """Проверить, настроен ли Gemini API."""
-    key = os.getenv("GEMINI_API_KEY", "")
+    key = api_key or os.getenv("GEMINI_API_KEY", "")
     if not key:
         return False, "Gemini API key not set"
     try:
@@ -291,12 +291,15 @@ PROVIDER_NAMES = {
 }
 
 
-def get_analyzer(provider: str) -> BaseAnalyzer:
-    """Фабрика — возвращает экземпляр анализатора по имени провайдера."""
+def get_analyzer(provider: str, **kwargs) -> BaseAnalyzer:
+    """Фабрика — возвращает экземпляр анализатора по имени провайдера.
+
+    Параметры:
+        provider: имя провайдера (ollama/deepseek/gemini)
+        **kwargs: передаются в конструктор анализатора (api_key, model, host)
+    """
     provider = provider.lower()
     cls = PROVIDER_MAP.get(provider)
     if cls is None:
         raise ValueError(f"Unknown provider '{provider}'. Choose from: {', '.join(PROVIDER_MAP)}")
-    return cls[0]()
-
-
+    return cls[0](**kwargs)

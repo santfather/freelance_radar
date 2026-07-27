@@ -56,5 +56,32 @@ class Job:
         }
 
 
+# ── Pydantic models for API ─────────────────────────────────────────────────
+
 class SettingsUpdate(BaseModel):
     provider: str | None = None
+
+
+class UserRegister(BaseModel):
+    email: str
+    password: str
+
+
+class UserLogin(BaseModel):
+    email: str
+    password: str
+
+
+class SettingsUpdateFull(BaseModel):
+    deepseek_api_key: str | None = None
+    deepseek_model: str | None = None
+    gemini_api_key: str | None = None
+    gemini_model: str | None = None
+    ollama_model: str | None = None
+    ollama_host: str | None = None
+
+
+class TestConnectionRequest(BaseModel):
+    provider: str
+    api_key: str | None = None
+    model: str | None = None

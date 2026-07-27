@@ -10,8 +10,9 @@ import logging
 from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, BackgroundTasks, Depends, Query, Request
+from fastapi import FastAPI, BackgroundTasks, Depends, HTTPException, Query, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 load_dotenv()
 
@@ -28,6 +29,9 @@ from analyzer import (
     check_deepseek_available,
     check_gemini_available,
     PROVIDER_NAMES,
+    DeepSeekAnalyzer,
+    GeminiAnalyzer,
+    OllamaAnalyzer,
 )
 from database import (
     init_db,
@@ -41,10 +45,40 @@ from database import (
     set_setting,
     get_all_settings,
     reset_all_analysis,
+    create_user,
+    get_user_by_email,
+    get_user_by_id,
+    get_user_settings,
+    update_user_settings,
 )
 from scrapers import ALL_SCRAPERS
-from models import SettingsUpdate
+from models import SettingsUpdate, UserRegister, UserLogin, SettingsUpdateFull, TestConnectionRequest
 from services.state import AppState
+from auth import hash_password, verify_password, create_access_token, decode_token
+
+# ── Безопасность ─────────────────────────────────────────────────────────────
+
+security = HTTPBearer(auto_error=False)
+
+
+async def get_current_user(
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+) -> dict:
+    """Извлекает и проверяет JWT-токен, возвращает данные пользователя."""
+    if credentials is None:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    token = credentials.credentials
+    try:
+        payload = decode_token(token)
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    user_id = payload.get("sub")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    user = await get_user_by_id(int(user_id))
+    if user is None:
+        raise HTTPException(status_code=401, detail="User not found")
+    return user
 
 
 # ── Зависимость состояния ─────────────────────────────────────────────────────
@@ -177,7 +211,7 @@ async def _analyze_one_job(analyzer, job):
     return job
 
 
-# ── API routes ────────────────────────────────────────────────────────────────
+# ── API routes: Public ───────────────────────────────────────────────────────
 
 @app.get("/", response_class=HTMLResponse)
 async def index():
@@ -208,6 +242,7 @@ async def analyze(
     provider: str = Query(default=""),
     force: bool = Query(default=False),
     state: AppState = Depends(get_state),
+    current_user: dict | None = Depends(get_current_user),
 ):
     """Запустить анализ заказов.
 
@@ -310,7 +345,7 @@ async def status(state: AppState = Depends(get_state)):
 
 @app.get("/api/settings")
 async def settings_get():
-    """Получить все настройки."""
+    """Получить все настройки (публичная key-value часть)."""
     db_settings = await get_all_settings()
     provider = db_settings.get("llm_provider", os.getenv("LLM_PROVIDER", "ollama"))
     return JSONResponse({
@@ -322,7 +357,7 @@ async def settings_get():
 
 @app.post("/api/settings")
 async def settings_post(data: SettingsUpdate):
-    """Обновить настройки."""
+    """Обновить настройки (публичная часть — только выбор провайдера)."""
     if data.provider:
         provider = data.provider.lower()
         if provider not in ("ollama", "deepseek", "gemini"):
@@ -332,3 +367,177 @@ async def settings_post(data: SettingsUpdate):
             )
         await set_setting("llm_provider", provider)
     return JSONResponse({"status": "ok"})
+
+
+# ── API routes: Auth ─────────────────────────────────────────────────────────
+
+@app.post("/api/register")
+async def register(data: UserRegister):
+    """Регистрация нового пользователя."""
+    email = data.email.strip().lower()
+    password = data.password
+
+    if len(password) < 6:
+        return JSONResponse(
+            {"status": "error", "message": "Пароль должен быть минимум 6 символов"},
+            status_code=400,
+        )
+
+    existing = await get_user_by_email(email)
+    if existing:
+        return JSONResponse(
+            {"status": "error", "message": "Email уже зарегистрирован"},
+            status_code=409,
+        )
+
+    pwd_hash = hash_password(password)
+    user_id = await create_user(email, pwd_hash)
+
+    # Сразу выдаём токен
+    token = create_access_token({"sub": str(user_id)})
+    return JSONResponse({
+        "status": "ok",
+        "access_token": token,
+        "token_type": "bearer",
+        "user": {"id": user_id, "email": email},
+    })
+
+
+@app.post("/api/login")
+async def login(data: UserLogin):
+    """Вход — проверка пароля, выдача JWT."""
+    email = data.email.strip().lower()
+    user = await get_user_by_email(email)
+    if not user:
+        return JSONResponse(
+            {"status": "error", "message": "Неверный email или пароль"},
+            status_code=401,
+        )
+
+    if not verify_password(data.password, user["password_hash"]):
+        return JSONResponse(
+            {"status": "error", "message": "Неверный email или пароль"},
+            status_code=401,
+        )
+
+    token = create_access_token({"sub": str(user["id"])})
+    return JSONResponse({
+        "status": "ok",
+        "access_token": token,
+        "token_type": "bearer",
+        "user": {"id": user["id"], "email": user["email"], "is_admin": bool(user["is_admin"])},
+    })
+
+
+@app.get("/api/me")
+async def me(current_user: dict = Depends(get_current_user)):
+    """Данные текущего пользователя."""
+    return JSONResponse({
+        "id": current_user["id"],
+        "email": current_user["email"],
+        "is_admin": bool(current_user["is_admin"]),
+    })
+
+
+@app.post("/api/logout")
+async def logout():
+    """Выход — на бэкенде ничего не делаем (клиент удаляет токен)."""
+    return JSONResponse({"ok": True})
+
+
+# ── API routes: Protected Settings ──────────────────────────────────────────
+
+def _mask_key(key: str) -> str:
+    """Замаскировать API-ключ: показать первые 4 и последние 4 символа."""
+    if not key or len(key) < 8:
+        return ""
+    return key[:4] + "****" + key[-4:]
+
+
+@app.get("/api/user/settings")
+async def user_settings_get(current_user: dict = Depends(get_current_user)):
+    """Получить настройки LLM текущего пользователя (с маскировкой ключей)."""
+    settings = await get_user_settings(current_user["id"])
+    # Маскируем ключи
+    masked = dict(settings)
+    if masked.get("deepseek_api_key"):
+        masked["deepseek_api_key"] = _mask_key(masked["deepseek_api_key"])
+    if masked.get("gemini_api_key"):
+        masked["gemini_api_key"] = _mask_key(masked["gemini_api_key"])
+    return JSONResponse(masked)
+
+
+@app.put("/api/user/settings")
+async def user_settings_update(
+    data: SettingsUpdateFull,
+    current_user: dict = Depends(get_current_user),
+):
+    """Обновить настройки LLM текущего пользователя."""
+    update_data = {}
+    for key in ("deepseek_api_key", "deepseek_model", "gemini_api_key",
+                 "gemini_model", "ollama_model", "ollama_host"):
+        value = getattr(data, key, None)
+        if value is not None:
+            update_data[key] = value
+
+    await update_user_settings(current_user["id"], update_data)
+    return JSONResponse({"status": "ok"})
+
+
+@app.post("/api/test-connection")
+async def test_connection(
+    data: TestConnectionRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """Проверить подключение к провайдеру."""
+    provider = data.provider.lower()
+    if provider not in ("ollama", "deepseek", "gemini"):
+        return JSONResponse(
+            {"success": False, "message": f"Неизвестный провайдер: {provider}"},
+        )
+
+    api_key = data.api_key
+    model = data.model
+
+    # Если ключ/модель не переданы, берём из сохранённых настроек пользователя
+    if not api_key or not model:
+        settings = await get_user_settings(current_user["id"])
+
+    if provider == "ollama":
+        host = data.api_key or settings.get("ollama_host", "http://localhost:11434")
+        model = model or settings.get("ollama_model", "qwen2.5:14b")
+        ok, msg = await check_ollama_available(model=model, host=host)
+        return JSONResponse({"success": ok, "message": msg})
+
+    elif provider == "deepseek":
+        key = api_key or settings.get("deepseek_api_key", "")
+        model = model or settings.get("deepseek_model", "deepseek-chat")
+        if not key:
+            return JSONResponse({"success": False, "message": "API key не указан"})
+        # Тестовый запрос
+        try:
+            analyzer = DeepSeekAnalyzer(api_key=key, model=model)
+            result = await analyzer.analyze("Test", "Web App", "100", "Hello, this is a test.")
+            success = result["verdict"] != "UNKNOWN" or "error" not in result.get("reason", "").lower()
+            return JSONResponse({
+                "success": success,
+                "message": "DeepSeek API OK" if success else f"Ошибка: {result.get('reason', 'Unknown')}",
+            })
+        except Exception as e:
+            return JSONResponse({"success": False, "message": f"DeepSeek error: {e}"})
+
+    elif provider == "gemini":
+        key = api_key or settings.get("gemini_api_key", "")
+        model = model or settings.get("gemini_model", "gemini-1.5-flash")
+        if not key:
+            return JSONResponse({"success": False, "message": "API key не указан"})
+        try:
+            analyzer = GeminiAnalyzer(api_key=key, model=model)
+            result = await analyzer.analyze("Test", "Web App", "100", "Hello, this is a test.")
+            success = result["verdict"] != "UNKNOWN" or "error" not in result.get("reason", "").lower()
+            return JSONResponse({
+                "success": success,
+                "message": "Gemini API OK" if success else f"Ошибка: {result.get('reason', 'Unknown')}",
+            })
+        except Exception as e:
+            return JSONResponse({"success": False, "message": f"Gemini error: {e}"})

@@ -3,18 +3,53 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>🎯 Freelance Radar</title>
+<title>🎯 Freelance Radar ✨</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@400;700;800&family=M+PLUS+Rounded+1c:wght@400;700;800&family=Quicksand:wght@400;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/static/styles.css"/>
 </head>
 <body>
 
+<!-- 🦄 Декоративные фоновые элементы -->
+<div class="rainbow-bar"></div>
+<div class="star-field"></div>
+<div class="floating-hearts"></div>
+<div class="cloud cloud-1"></div>
+<div class="cloud cloud-2"></div>
+<div class="cloud cloud-3"></div>
+<div id="kawaii-unicorn" class="kawaii-unicorn">🦄</div>
+
+<!-- 🎊 Конфетти контейнер -->
+<div id="confetti-container" class="confetti-container"></div>
+
 <header>
-  <h1>🎯 Freelance <span>Radar</span></h1>
+  <div class="header-brand">
+    <div class="logo-icon">🎯</div>
+    <h1>Freelance <span>Radar</span> <span class="sparkle">✨</span></h1>
+  </div>
+  <div class="header-subtitle">✨ Твой кавайный помощник в мире фриланса ✨</div>
   <div class="stats">
-    <div class="stat"><div class="val" id="stat-total">—</div><div class="lbl">Всего</div></div>
-    <div class="stat"><div class="val" id="stat-analyzed">—</div><div class="lbl">Проанализировано</div></div>
-    <div class="stat"><div class="val" id="stat-unanalyzed" style="color:var(--unknown)">—</div><div class="lbl">В очереди</div></div>
-    <div class="stat"><div class="val" style="color:var(--take)" id="stat-take">—</div><div class="lbl">БРАТЬ</div></div>
+    <div class="stat stat-total">
+      <div class="stat-emoji">📦</div>
+      <div class="val" id="stat-total">—</div>
+      <div class="lbl">Всего</div>
+    </div>
+    <div class="stat stat-analyzed">
+      <div class="stat-emoji">🔬</div>
+      <div class="val" id="stat-analyzed">—</div>
+      <div class="lbl">Проанализировано</div>
+    </div>
+    <div class="stat stat-unanalyzed">
+      <div class="stat-emoji">⏳</div>
+      <div class="val" id="stat-unanalyzed" style="color:var(--unknown)">—</div>
+      <div class="lbl">В очереди</div>
+    </div>
+    <div class="stat stat-take">
+      <div class="stat-emoji">💖</div>
+      <div class="val" style="color:var(--take)" id="stat-take">—</div>
+      <div class="lbl">БРАТЬ 💕</div>
+    </div>
   </div>
   <div id="provider-status" class="provider-status unknown">⏳ Проверка...</div>
 </header>
@@ -22,43 +57,49 @@
 <div class="status-bar">
   <div class="status-item">
     <div id="scrape-dot" class="status-dot"></div>
-    <span id="scrape-label">Парсинг: не запущен</span>
+    <span id="scrape-label">🍬 Парсинг: не запущен</span>
   </div>
   <div class="status-item">
     <div id="analyze-dot" class="status-dot"></div>
-    <span id="analyze-label">Анализ: не запущен</span>
+    <span id="analyze-label">🌟 Анализ: не запущен</span>
   </div>
 </div>
 
-<div class="toolbar">
-  <button class="btn" id="btn-scrape" onclick="startScrape()">🔄 Запустить парсинг</button>
+<!-- 🎀 Вкладки -->
+<div class="tabs-bar">
+  <button class="tab-btn active" id="tab-jobs" onclick="switchTab('jobs')">📋 Заказы</button>
+  <button class="tab-btn" id="tab-settings" onclick="switchTab('settings')">⚙️ Настройки</button>
+</div>
+
+<div class="toolbar" id="jobs-toolbar">
+  <button class="btn btn-scrape" id="btn-scrape" onclick="startScrape()">🔄 Запустить парсинг</button>
   <button class="btn btn-analyze" id="btn-analyze" onclick="startAnalysis()">🧠 Запустить анализ</button>
-  <button class="btn btn-outline" id="btn-reanalyze" onclick="startReanalysis()" style="border-color:#7c3aed;color:#a78bfa">🔄 Переанализировать всё</button>
+  <button class="btn btn-reanalyze" id="btn-reanalyze" onclick="startReanalysis()">🔄 Переанализировать всё</button>
 
   <div class="provider-select-wrap">
-    <label for="provider-select">Анализатор:</label>
+    <label for="provider-select">🎀 Анализатор:</label>
     <select id="provider-select" onchange="changeProvider(this.value)">
-      <option value="ollama">Ollama (локально)</option>
-      <option value="deepseek">DeepSeek API</option>
-      <option value="gemini">Gemini API</option>
+      <option value="ollama">🤖 Ollama</option>
+      <option value="deepseek">🐋 DeepSeek</option>
+      <option value="gemini">✨ Gemini</option>
     </select>
   </div>
 
   <select id="filter-verdict" onchange="loadJobs()">
-    <option value="all">Все вердикты</option>
+    <option value="all">🏷️ Все вердикты</option>
     <option value="take">✅ БРАТЬ</option>
     <option value="skip">❌ Пропустить</option>
     <option value="unknown">⏳ Не проанализировано</option>
   </select>
 
   <select id="filter-analyzed" onchange="loadJobs()">
-    <option value="all">Любой анализ</option>
-    <option value="0">Только без анализа</option>
-    <option value="1">Только проанализированные</option>
+    <option value="all">🔍 Любой анализ</option>
+    <option value="0">🆕 Без анализа</option>
+    <option value="1">✅ Проанализированные</option>
   </select>
 
   <select id="filter-category" onchange="loadJobs()">
-    <option value="all">Все категории</option>
+    <option value="all">📂 Все категории</option>
     <option value="Web App">🌐 Web App</option>
     <option value="Mobile App">📱 Mobile App</option>
     <option value="CMS">🔧 CMS</option>
@@ -67,22 +108,137 @@
 
   <button class="btn btn-outline" onclick="toggleLog()">📋 Лог</button>
 
-  <span style="flex:1"></span>
+  <span class="toolbar-spacer"></span>
 
   <button class="btn-icon" id="btn-sort" onclick="toggleSort()" title="Сортировка">↑ Новые</button>
   <button class="btn-icon active" id="btn-grid" onclick="setView('grid')" title="Плитки">⊞</button>
   <button class="btn-icon" id="btn-list" onclick="setView('list')" title="Список">≡</button>
 </div>
 
-<div id="log-box" class="log-box"></div>
+<div id="log-box" class="log-box"><span class="log-placeholder">💬 Здесь будут появляться сообщения...</span></div>
 
 <div id="progress-wrap" class="progress-bar-wrap hidden">
   <div id="progress-fill" class="progress-bar-fill"></div>
 </div>
 <div id="progress-label" class="progress-label hidden"></div>
 
-<div class="content" id="content">
-  <div class="empty">Нажми «Запустить парсинг» чтобы собрать заказы</div>
+<!-- 📋 Вкладка "Заказы" -->
+<div class="content" id="jobs-content">
+  <div class="empty">🌸 Нажми «Запустить парсинг» чтобы собрать заказы 🌸</div>
+</div>
+
+<!-- ⚙️ Вкладка "Настройки" -->
+<div class="content settings-content hidden" id="settings-content">
+  <!-- Форма входа / регистрации (показывается, если не авторизован) -->
+  <div id="auth-section" class="settings-panel">
+    <div class="settings-title">🔐 Войти / Зарегистрироваться</div>
+
+    <div id="login-form" class="auth-form">
+      <div class="auth-field">
+        <label>📧 Email</label>
+        <input type="email" id="login-email" placeholder="your@email.com" class="settings-input" />
+      </div>
+      <div class="auth-field">
+        <label>🔑 Пароль</label>
+        <input type="password" id="login-password" placeholder="минимум 6 символов" class="settings-input" />
+      </div>
+      <div class="auth-actions">
+        <button class="btn btn-scrape" onclick="doLogin()">🚪 Войти</button>
+        <span class="auth-switch">Нет аккаунта? <a href="#" onclick="showRegister()">Зарегистрироваться 🌸</a></span>
+      </div>
+      <div id="login-error" class="auth-error hidden"></div>
+    </div>
+
+    <div id="register-form" class="auth-form hidden">
+      <div class="auth-field">
+        <label>📧 Email</label>
+        <input type="email" id="reg-email" placeholder="your@email.com" class="settings-input" />
+      </div>
+      <div class="auth-field">
+        <label>🔑 Пароль</label>
+        <input type="password" id="reg-password" placeholder="минимум 6 символов" class="settings-input" />
+      </div>
+      <div class="auth-field">
+        <label>🔑 Повторите пароль</label>
+        <input type="password" id="reg-password2" placeholder="повторите пароль" class="settings-input" />
+      </div>
+      <div class="auth-actions">
+        <button class="btn btn-analyze" onclick="doRegister()">✨ Зарегистрироваться</button>
+        <span class="auth-switch">Уже есть аккаунт? <a href="#" onclick="showLogin()">Войти 🚪</a></span>
+      </div>
+      <div id="reg-error" class="auth-error hidden"></div>
+    </div>
+  </div>
+
+  <!-- Форма настроек (показывается, если авторизован) -->
+  <div id="settings-section" class="settings-panel hidden">
+    <div class="settings-title">⚙️ Настройки LLM</div>
+    <div class="settings-user-info" id="settings-user-info"></div>
+
+    <!-- DeepSeek -->
+    <div class="provider-block">
+      <div class="provider-block-title">🐋 DeepSeek</div>
+      <div class="settings-field">
+        <label>API Key</label>
+        <input type="password" id="set-deepseek-key" class="settings-input" placeholder="sk-..." />
+      </div>
+      <div class="settings-field">
+        <label>Модель</label>
+        <select id="set-deepseek-model" class="settings-select">
+          <option value="deepseek-chat">deepseek-chat</option>
+          <option value="deepseek-coder">deepseek-coder</option>
+        </select>
+      </div>
+      <div class="settings-field-actions">
+        <button class="btn-test" onclick="testConnection('deepseek')" id="test-deepseek">🧪 Test</button>
+        <span id="test-deepseek-result" class="test-result"></span>
+      </div>
+    </div>
+
+    <!-- Gemini -->
+    <div class="provider-block">
+      <div class="provider-block-title">✨ Gemini</div>
+      <div class="settings-field">
+        <label>API Key</label>
+        <input type="password" id="set-gemini-key" class="settings-input" placeholder="AIza..." />
+      </div>
+      <div class="settings-field">
+        <label>Модель</label>
+        <select id="set-gemini-model" class="settings-select">
+          <option value="gemini-1.5-flash">gemini-1.5-flash</option>
+          <option value="gemini-1.5-pro">gemini-1.5-pro</option>
+          <option value="gemini-1.0-pro">gemini-1.0-pro</option>
+        </select>
+      </div>
+      <div class="settings-field-actions">
+        <button class="btn-test" onclick="testConnection('gemini')" id="test-gemini">🧪 Test</button>
+        <span id="test-gemini-result" class="test-result"></span>
+      </div>
+    </div>
+
+    <!-- Ollama -->
+    <div class="provider-block">
+      <div class="provider-block-title">🤖 Ollama</div>
+      <div class="settings-field">
+        <label>Модель</label>
+        <input type="text" id="set-ollama-model" class="settings-input" placeholder="qwen2.5:14b" />
+      </div>
+      <div class="settings-field">
+        <label>Host</label>
+        <input type="text" id="set-ollama-host" class="settings-input" placeholder="http://localhost:11434" />
+      </div>
+      <div class="settings-field-actions">
+        <button class="btn-test" onclick="testConnection('ollama')" id="test-ollama">🧪 Test</button>
+        <span id="test-ollama-result" class="test-result"></span>
+      </div>
+    </div>
+
+    <div class="settings-actions">
+      <button class="btn btn-analyze" onclick="saveSettings()" id="btn-save-settings">💾 Сохранить настройки</button>
+      <button class="btn btn-outline" onclick="doLogout()">🚪 Выйти</button>
+    </div>
+    <div id="settings-save-result" class="settings-save-result"></div>
+  </div>
 </div>
 
 <script src="/static/app.js"></script>

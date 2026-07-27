@@ -4,6 +4,117 @@ let logVisible = false;
 let pollInterval = null;
 let sortDir = 'desc';
 let viewMode = 'grid';
+let currentUser = null;
+
+// ── Вкладки ──
+function switchTab(tab) {
+  document.getElementById('tab-jobs').classList.toggle('active', tab === 'jobs');
+  document.getElementById('tab-settings').classList.toggle('active', tab === 'settings');
+  document.getElementById('jobs-content').classList.toggle('hidden', tab !== 'jobs');
+  document.getElementById('jobs-toolbar').classList.toggle('hidden', tab !== 'jobs');
+  document.getElementById('settings-content').classList.toggle('hidden', tab !== 'settings');
+  if (tab === 'settings') {
+    initSettingsTab();
+  }
+}
+
+// ── Auth helpers ──
+function getToken() {
+  return localStorage.getItem('auth_token');
+}
+
+function setToken(token) {
+  if (token) {
+    localStorage.setItem('auth_token', token);
+  } else {
+    localStorage.removeItem('auth_token');
+  }
+}
+
+async function apiFetch(url, options = {}) {
+  const token = getToken();
+  const headers = { ...options.headers };
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+  if (options.body && typeof options.body === 'object' && !(options.body instanceof FormData)) {
+    headers['Content-Type'] = 'application/json';
+    options.body = JSON.stringify(options.body);
+  }
+  const res = await fetch(url, { ...options, headers });
+  const data = await res.json();
+  if (res.status === 401) {
+    setToken(null);
+    currentUser = null;
+    if (!document.getElementById('settings-content').classList.contains('hidden')) {
+      updateAuthUI();
+    }
+  }
+  return data;
+}
+
+// ── 🎊 Конфетти ──
+function burstConfetti() {
+  const container = document.getElementById('confetti-container');
+  const colors = ['#FF69B4', '#9B59B6', '#1ABC9C', '#F1C40F', '#FFA500', '#48D1CC', '#FF6B6B', '#E6E6FA'];
+  const emojis = ['🌟', '💖', '✨', '🎀', '⭐', '🌈', '🦄', '🌸'];
+
+  for (let i = 0; i < 40; i++) {
+    const piece = document.createElement('div');
+    piece.className = 'confetti-piece';
+    const isEmoji = Math.random() > 0.5;
+    if (isEmoji) {
+      piece.textContent = emojis[Math.floor(Math.random() * emojis.length)];
+      piece.style.fontSize = (12 + Math.random() * 16) + 'px';
+    } else {
+      piece.style.width = (6 + Math.random() * 10) + 'px';
+      piece.style.height = (6 + Math.random() * 10) + 'px';
+      piece.style.background = colors[Math.floor(Math.random() * colors.length)];
+      piece.style.borderRadius = Math.random() > 0.5 ? '50%' : '2px';
+    }
+    piece.style.left = Math.random() * 100 + '%';
+    piece.style.animationDuration = (2 + Math.random() * 2) + 's';
+    piece.style.animationDelay = Math.random() * 0.5 + 's';
+    container.appendChild(piece);
+    setTimeout(() => piece.remove(), 4000);
+  }
+}
+
+// ── ✨ Золотые звёзды (при ховере на сердечки и единорога) ──
+function burstGoldenStars() {
+  const container = document.getElementById('confetti-container');
+  const stars = ['⭐', '🌟', '✨', '💫', '🌟', '⭐'];
+
+  for (let i = 0; i < 15; i++) {
+    const piece = document.createElement('div');
+    piece.className = 'confetti-piece';
+    piece.textContent = stars[Math.floor(Math.random() * stars.length)];
+    piece.style.fontSize = (14 + Math.random() * 20) + 'px';
+    piece.style.color = '#FFD700';
+    piece.style.textShadow = '0 0 6px rgba(255, 215, 0, 0.8)';
+    piece.style.left = Math.random() * 100 + '%';
+    piece.style.animationDuration = (1.5 + Math.random() * 1.5) + 's';
+    piece.style.animationDelay = Math.random() * 0.3 + 's';
+    container.appendChild(piece);
+    setTimeout(() => piece.remove(), 3000);
+  }
+}
+
+// ── Навешиваем ховер-эффекты ──
+document.addEventListener('DOMContentLoaded', () => {
+  const unicorn = document.getElementById('kawaii-unicorn');
+  const hearts = document.querySelector('.floating-hearts');
+
+  if (unicorn) {
+    unicorn.addEventListener('mouseenter', () => { burstGoldenStars(); });
+    unicorn.addEventListener('click', () => { burstGoldenStars(); });
+  }
+  if (hearts) {
+    hearts.classList.add('interactive');
+    hearts.addEventListener('mouseenter', () => { burstGoldenStars(); });
+    hearts.addEventListener('click', () => { burstGoldenStars(); });
+  }
+});
 
 async function pollUntilDone(options) {
   const { getButton, onComplete } = options;
@@ -13,15 +124,24 @@ async function pollUntilDone(options) {
     updateProgressUI(s);
     updateScrapeStatus(s.scraping);
     updateAnalyzeStatus(s.analyzing, s.analyze_progress, s.analyze_total);
-    if (s.log) document.getElementById('log-box').innerHTML = s.log.map(l => `<div>${escHtml(l)}</div>`).join('');
+    if (s.log) {
+      const logBox = document.getElementById('log-box');
+      logBox.innerHTML = s.log.map(l => `<div>${escHtml(l)}</div>`).join('');
+    }
     ['total','analyzed','unanalyzed','take'].forEach(k => {
       const el = document.getElementById(`stat-${k}`);
-      if (el) el.textContent = s[k] ?? '—';
+      if (el) {
+        el.textContent = s[k] ?? '—';
+        // tiny pop animation on update
+        el.style.transform = 'scale(1.15)';
+        setTimeout(() => el.style.transform = '', 300);
+      }
     });
     if (!s.scraping && !s.analyzing) {
       clearInterval(pollInterval);
       pollInterval = null;
       if (getButton) getButton().disabled = false;
+      burstConfetti();
       if (onComplete) await onComplete();
       await loadJobs();
       await loadStats();
@@ -72,10 +192,10 @@ function updateScrapeStatus(running) {
   const label = document.getElementById('scrape-label');
   if (running) {
     dot.className = 'status-dot active';
-    label.textContent = 'Парсинг: выполняется...';
+    label.textContent = '🍬 Парсинг: выполняется...';
   } else {
     dot.className = 'status-dot';
-    label.textContent = 'Парсинг: не запущен';
+    label.textContent = '🍬 Парсинг: не запущен';
   }
 }
 
@@ -84,10 +204,10 @@ function updateAnalyzeStatus(running, progress, total) {
   const label = document.getElementById('analyze-label');
   if (running) {
     dot.className = 'status-dot active';
-    label.textContent = `Анализ: ${progress || 0} / ${total || '?'}`;
+    label.textContent = `🌟 Анализ: ${progress || 0} / ${total || '?'}`;
   } else {
     dot.className = 'status-dot';
-    label.textContent = 'Анализ: не запущен';
+    label.textContent = '🌟 Анализ: не запущен';
   }
 }
 
@@ -124,9 +244,9 @@ async function loadJobs() {
   const params = new URLSearchParams({ verdict, category, analyzed, sort: sortDir });
   const jobs = await fetch(`/api/jobs?${params}`).then(r => r.json());
 
-  const content = document.getElementById('content');
+  const content = document.getElementById('jobs-content');
   if (!jobs.length) {
-    content.innerHTML = '<div class="empty">Нет заказов по выбранным фильтрам</div>';
+    content.innerHTML = '<div class="empty">🌸 Нет заказов по выбранным фильтрам 🌸</div>';
     return;
   }
 
@@ -139,6 +259,7 @@ async function loadJobs() {
   });
 
   let html = '';
+  let cardIndex = 0;
   for (const cat of CATEGORIES) {
     const list = byCategory[cat];
     if (!list.length) continue;
@@ -146,14 +267,14 @@ async function loadJobs() {
       <div class="category-title">${CAT_ICONS[cat] || '📁'} ${cat} <span class="cnt">${list.length}</span></div>
       <div class="job-grid${viewMode === 'list' ? ' list-layout' : ''}">`;
     for (const job of list) {
-      html += renderCard(job);
+      html += renderCard(job, cardIndex++);
     }
     html += `</div></div>`;
   }
   content.innerHTML = html;
 }
 
-function renderCard(job) {
+function renderCard(job, index) {
   const v = job.verdict || 'UNKNOWN';
   const cls = v === 'TAKE' ? 'take' : v === 'SKIP' ? 'skip' : 'unknown';
   let badge;
@@ -175,7 +296,10 @@ function renderCard(job) {
     ? escHtml(job.description.slice(0, 180)) + (job.description.length > 180 ? '…' : '')
     : '';
 
-  return `<div class="job-card ${cls}">
+  // Staggered animation delay for cards
+  const delay = (index % 12) * 0.05;
+
+  return `<div class="job-card ${cls}" style="animation-delay: ${delay}s">
     <div class="job-header">
       <span class="verdict-badge ${v}">${badge}</span>
       <div class="job-title"><a href="${job.url}" target="_blank">${escHtml(job.title)}</a></div>
@@ -236,7 +360,7 @@ async function startAnalysis() {
 async function startReanalysis() {
   const btn = document.getElementById('btn-reanalyze');
   const btnAnalyze = document.getElementById('btn-analyze');
-  if (!confirm(`Сбросить все вердикты и переанализировать все ${document.getElementById('stat-total').textContent} заказов?`)) return;
+  if (!confirm(`🌸 Сбросить все вердикты и переанализировать все ${document.getElementById('stat-total').textContent} заказов? 🌸`)) return;
   btn.disabled = true;
   btnAnalyze.disabled = true;
   btn.textContent = '⏳ Переанализ...';
@@ -281,7 +405,217 @@ function setView(mode) {
   loadJobs();
 }
 
+// ═══════════════════════════════════════════════════════════════
+// 🔐 Аутентификация и настройки
+// ═══════════════════════════════════════════════════════════════
+
+function showLogin() {
+  document.getElementById('login-form').classList.remove('hidden');
+  document.getElementById('register-form').classList.add('hidden');
+}
+
+function showRegister() {
+  document.getElementById('login-form').classList.add('hidden');
+  document.getElementById('register-form').classList.remove('hidden');
+}
+
+function showAuthError(elId, msg) {
+  const el = document.getElementById(elId);
+  el.textContent = msg;
+  el.classList.remove('hidden');
+}
+
+function hideAuthErrors() {
+  document.getElementById('login-error').classList.add('hidden');
+  document.getElementById('reg-error').classList.add('hidden');
+}
+
+async function doLogin() {
+  hideAuthErrors();
+  const email = document.getElementById('login-email').value.trim();
+  const password = document.getElementById('login-password').value;
+  if (!email || !password) {
+    showAuthError('login-error', 'Пожалуйста, заполните все поля');
+    return;
+  }
+  const res = await apiFetch('/api/login', {
+    method: 'POST',
+    body: { email, password },
+  });
+  if (res.access_token) {
+    setToken(res.access_token);
+    currentUser = res.user;
+    updateAuthUI();
+  } else {
+    showAuthError('login-error', res.message || 'Ошибка входа');
+  }
+}
+
+async function doRegister() {
+  hideAuthErrors();
+  const email = document.getElementById('reg-email').value.trim();
+  const password = document.getElementById('reg-password').value;
+  const password2 = document.getElementById('reg-password2').value;
+  if (!email || !password || !password2) {
+    showAuthError('reg-error', 'Пожалуйста, заполните все поля');
+    return;
+  }
+  if (password !== password2) {
+    showAuthError('reg-error', 'Пароли не совпадают');
+    return;
+  }
+  if (password.length < 6) {
+    showAuthError('reg-error', 'Пароль должен быть минимум 6 символов');
+    return;
+  }
+  const res = await apiFetch('/api/register', {
+    method: 'POST',
+    body: { email, password },
+  });
+  if (res.access_token) {
+    setToken(res.access_token);
+    currentUser = res.user;
+    updateAuthUI();
+    burstConfetti();
+  } else {
+    showAuthError('reg-error', res.message || 'Ошибка регистрации');
+  }
+}
+
+async function doLogout() {
+  setToken(null);
+  currentUser = null;
+  updateAuthUI();
+}
+
+async function updateAuthUI() {
+  const token = getToken();
+  if (token) {
+    // Проверяем токен на сервере
+    const me = await apiFetch('/api/me');
+    if (me.id) {
+      currentUser = { id: me.id, email: me.email, is_admin: me.is_admin };
+      document.getElementById('auth-section').classList.add('hidden');
+      document.getElementById('settings-section').classList.remove('hidden');
+      document.getElementById('settings-user-info').textContent = `👋 Привет, ${me.email}!`;
+      await loadUserSettings();
+      return;
+    }
+  }
+  // Не авторизован
+  currentUser = null;
+  document.getElementById('auth-section').classList.remove('hidden');
+  document.getElementById('settings-section').classList.add('hidden');
+}
+
+async function loadUserSettings() {
+  const res = await apiFetch('/api/user/settings');
+  if (res.deepseek_api_key !== undefined) {
+    document.getElementById('set-deepseek-key').value = res.deepseek_api_key || '';
+    document.getElementById('set-deepseek-model').value = res.deepseek_model || 'deepseek-chat';
+    document.getElementById('set-gemini-key').value = res.gemini_api_key || '';
+    document.getElementById('set-gemini-model').value = res.gemini_model || 'gemini-1.5-flash';
+    document.getElementById('set-ollama-model').value = res.ollama_model || 'qwen2.5:14b';
+    document.getElementById('set-ollama-host').value = res.ollama_host || 'http://localhost:11434';
+  }
+}
+
+async function saveSettings() {
+  const btn = document.getElementById('btn-save-settings');
+  btn.disabled = true;
+  btn.textContent = '⏳ Сохранение...';
+  document.getElementById('settings-save-result').textContent = '';
+
+  const data = {
+    deepseek_api_key: document.getElementById('set-deepseek-key').value,
+    deepseek_model: document.getElementById('set-deepseek-model').value,
+    gemini_api_key: document.getElementById('set-gemini-key').value,
+    gemini_model: document.getElementById('set-gemini-model').value,
+    ollama_model: document.getElementById('set-ollama-model').value,
+    ollama_host: document.getElementById('set-ollama-host').value,
+  };
+
+  const res = await apiFetch('/api/user/settings', {
+    method: 'PUT',
+    body: data,
+  });
+
+  btn.disabled = false;
+  btn.textContent = '💾 Сохранить настройки';
+
+  const resultEl = document.getElementById('settings-save-result');
+  if (res.status === 'ok') {
+    resultEl.className = 'settings-save-result success';
+    resultEl.textContent = '✅ Настройки сохранены!';
+    // Reload with masked keys
+    await loadUserSettings();
+  } else {
+    resultEl.className = 'settings-save-result error';
+    resultEl.textContent = '❌ Ошибка сохранения';
+  }
+  setTimeout(() => { resultEl.textContent = ''; }, 3000);
+}
+
+async function testConnection(provider) {
+  const resultEl = document.getElementById(`test-${provider}-result`);
+  const btn = document.getElementById(`test-${provider}`);
+  btn.disabled = true;
+  btn.textContent = '⏳...';
+  resultEl.className = 'test-result';
+  resultEl.textContent = '⏳ Проверка...';
+
+  let api_key = null;
+  let model = null;
+
+  if (provider === 'deepseek') {
+    api_key = document.getElementById('set-deepseek-key').value || null;
+    model = document.getElementById('set-deepseek-model').value || null;
+  } else if (provider === 'gemini') {
+    api_key = document.getElementById('set-gemini-key').value || null;
+    model = document.getElementById('set-gemini-model').value || null;
+  } else if (provider === 'ollama') {
+    api_key = document.getElementById('set-ollama-host').value || null;
+    model = document.getElementById('set-ollama-model').value || null;
+  }
+
+  const res = await apiFetch('/api/test-connection', {
+    method: 'POST',
+    body: { provider, api_key, model },
+  });
+
+  btn.disabled = false;
+  btn.textContent = '🧪 Test';
+
+  if (res.success) {
+    resultEl.className = 'test-result success';
+    resultEl.textContent = '✅ ' + (res.message || 'OK');
+  } else {
+    resultEl.className = 'test-result error';
+    resultEl.textContent = '❌ ' + (res.message || 'Ошибка');
+  }
+  setTimeout(() => {
+    if (resultEl.textContent.startsWith('✅') || resultEl.textContent.startsWith('❌')) {
+      // keep visible for a bit
+    }
+  }, 5000);
+}
+
+async function initSettingsTab() {
+  await updateAuthUI();
+}
+
+// ── Init ──
 (async () => {
   await loadStats();
   await loadJobs();
+  // Check auth on load
+  const token = getToken();
+  if (token) {
+    const me = await apiFetch('/api/me');
+    if (me.id) {
+      currentUser = { id: me.id, email: me.email, is_admin: me.is_admin };
+    } else {
+      setToken(null);
+    }
+  }
 })();

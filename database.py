@@ -46,6 +46,29 @@ async def init_db():
                 value TEXT NOT NULL
             )
         """)
+        # Users table
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                email TEXT NOT NULL UNIQUE,
+                password_hash TEXT NOT NULL,
+                is_admin INTEGER DEFAULT 0,
+                created_at TEXT DEFAULT (datetime('now'))
+            )
+        """)
+        # User settings table (LLM credentials per user)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS user_settings (
+                user_id INTEGER PRIMARY KEY,
+                deepseek_api_key TEXT DEFAULT '',
+                deepseek_model TEXT DEFAULT 'deepseek-chat',
+                gemini_api_key TEXT DEFAULT '',
+                gemini_model TEXT DEFAULT 'gemini-1.5-flash',
+                ollama_model TEXT DEFAULT 'qwen2.5:14b',
+                ollama_host TEXT DEFAULT 'http://localhost:11434',
+                FOREIGN KEY (user_id) REFERENCES users(id)
+            )
+        """)
         # Performance indexes
         await db.execute("CREATE INDEX IF NOT EXISTS idx_jobs_analyzed ON jobs(analyzed)")
         await db.execute("CREATE INDEX IF NOT EXISTS idx_jobs_verdict ON jobs(verdict)")
@@ -176,7 +199,7 @@ async def reset_all_analysis():
         await db.commit()
 
 
-# ── Settings ─────────────────────────────────────────────────────────────────
+# ── Settings (key-value) ────────────────────────────────────────────────────
 
 async def get_setting(key: str, default: str = "") -> str:
     async with aiosqlite.connect(DB_PATH) as db:
@@ -200,3 +223,99 @@ async def get_all_settings() -> dict:
         async with db.execute("SELECT key, value FROM settings") as c:
             rows = await c.fetchall()
             return dict(rows)
+
+
+# ── Users ───────────────────────────────────────────────────────────────────
+
+async def create_user(email: str, password_hash: str) -> int:
+    """Создать пользователя. Возвращает его id. Первый пользователь — admin."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        # Check if this is the first user
+        async with db.execute("SELECT COUNT(*) FROM users") as c:
+            count = (await c.fetchone())[0]
+        is_admin = 1 if count == 0 else 0
+
+        cursor = await db.execute(
+            "INSERT INTO users (email, password_hash, is_admin) VALUES (?, ?, ?)",
+            (email, password_hash, is_admin),
+        )
+        user_id = cursor.lastrowid
+
+        # Auto-create user_settings row
+        await db.execute(
+            "INSERT INTO user_settings (user_id) VALUES (?)",
+            (user_id,),
+        )
+        await db.commit()
+        return user_id
+
+
+async def get_user_by_email(email: str) -> dict | None:
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute("SELECT * FROM users WHERE email=?", (email,)) as c:
+            row = await c.fetchone()
+            return dict(row) if row else None
+
+
+async def get_user_by_id(user_id: int) -> dict | None:
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute("SELECT * FROM users WHERE id=?", (user_id,)) as c:
+            row = await c.fetchone()
+            return dict(row) if row else None
+
+
+# ── User Settings (LLM credentials per user) ────────────────────────────────
+
+async def get_user_settings(user_id: int) -> dict:
+    """Получить настройки LLM для пользователя. Если нет — вернуть умолчания."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            "SELECT * FROM user_settings WHERE user_id=?", (user_id,)
+        ) as c:
+            row = await c.fetchone()
+            if row:
+                return dict(row)
+        # Defaults
+        return {
+            "user_id": user_id,
+            "deepseek_api_key": "",
+            "deepseek_model": "deepseek-chat",
+            "gemini_api_key": "",
+            "gemini_model": "gemini-1.5-flash",
+            "ollama_model": "qwen2.5:14b",
+            "ollama_host": "http://localhost:11434",
+        }
+
+
+async def update_user_settings(user_id: int, settings: dict):
+    """Обновить настройки LLM для пользователя."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        # Ensure row exists
+        async with db.execute(
+            "SELECT 1 FROM user_settings WHERE user_id=?", (user_id,)
+        ) as c:
+            exists = await c.fetchone()
+
+        if not exists:
+            await db.execute(
+                "INSERT INTO user_settings (user_id) VALUES (?)", (user_id,)
+            )
+
+        fields = []
+        values = []
+        for key in ("deepseek_api_key", "deepseek_model", "gemini_api_key",
+                     "gemini_model", "ollama_model", "ollama_host"):
+            if key in settings:
+                fields.append(f"{key}=?")
+                values.append(settings[key])
+
+        if fields:
+            values.append(user_id)
+            await db.execute(
+                f"UPDATE user_settings SET {', '.join(fields)} WHERE user_id=?",
+                values,
+            )
+        await db.commit()
