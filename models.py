@@ -6,7 +6,7 @@ from enum import Enum
 class Category(str, Enum):
     WEB_APP = "Web App"
     MOBILE_APP = "Mobile App"
-    CMS = "CMS / WordPress"
+    CMS = "CMS"
     OTHER_IT = "Other IT"
 
 

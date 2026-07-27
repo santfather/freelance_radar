@@ -20,16 +20,21 @@ CATEGORY_KEYWORDS = {
     Category.MOBILE_APP: [
         "android", "ios", "mobile", "flutter", "react native", "swift", "kotlin",
         "aplikacja mobilna", "aplikacje mobilne", "app store", "google play",
+        "ipad", "iphone", "xamarin", "ionic", "mobile app", "mobile application",
     ],
     Category.CMS: [
         "wordpress", "woocommerce", "joomla", "drupal", "cms", "magento",
         "prestashop", "shopify", "wix", "elementor", "wtyczka", "plugin",
-        "motyw", "theme",
+        "motyw", "theme", "ecommerce", "bigcommerce", "webflow", "content management",
+        "headless cms", "strapi", "modx", "bitrix", "1c-bitrix",
     ],
     Category.WEB_APP: [
         "web app", "webapp", "react", "vue", "angular", "next.js", "node",
         "django", "fastapi", "flask", "laravel", "api", "saas", "portal",
         "platforma", "aplikacja webowa", "strona www", "website", "landing",
+        "frontend", "backend", "full stack", "fullstack", "rest", "graphql",
+        "typescript", "javascript", "html", "css", "tailwind", "bootstrap",
+        "web development", "web application", "microservice",
     ],
 }
 
@@ -71,7 +76,7 @@ class BaseScraper(ABC):
         headers = {
             "User-Agent": random.choice(USER_AGENTS),
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-            "Accept-Language": "pl-PL,pl;q=0.9,en;q=0.8",
+            "Accept-Language": "en-US,en;q=0.9,pl-PL,pl;q=0.8",
             # No 'br' — httpx doesn't support brotli without extra package
             "Accept-Encoding": "gzip, deflate",
             "Connection": "keep-alive",
@@ -96,7 +101,7 @@ class BaseScraper(ABC):
         headers = {
             "User-Agent": random.choice(USER_AGENTS),
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-            "Accept-Language": "pl-PL,pl;q=0.9,en;q=0.8",
+            "Accept-Language": "en-US,en;q=0.9,pl-PL,pl;q=0.8",
             "Accept-Encoding": "gzip, deflate",
             "Connection": "keep-alive",
         }

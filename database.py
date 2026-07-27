@@ -1,4 +1,4 @@
-"""SQLite cache for scraped jobs."""
+"""SQLite cache for scraped jobs and settings."""
 
 import json
 import os
@@ -8,8 +8,25 @@ from models import Job, Category, Verdict
 DB_PATH = os.getenv("DB_PATH", "radar.db")
 
 
+# Map old category names to new ones (for backward compatibility)
+_OLD_CATEGORY_MAP = {
+    "CMS / WordPress": "CMS",
+}
+
+
+def _safe_category(name: str) -> Category:
+    """Convert string to Category, handling old/unknown names."""
+    name = _OLD_CATEGORY_MAP.get(name, name)
+    try:
+        return Category(name)
+    except ValueError:
+        return Category.OTHER_IT
+
+
+
 async def init_db():
     async with aiosqlite.connect(DB_PATH) as db:
+        # Jobs table
         await db.execute("""
             CREATE TABLE IF NOT EXISTS jobs (
                 id TEXT PRIMARY KEY,
@@ -30,8 +47,21 @@ async def init_db():
                 scraped_at TEXT DEFAULT (datetime('now'))
             )
         """)
+        # Settings table (key-value)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS settings (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            )
+        """)
+        # Migration: rename old category values
+        await db.execute(
+            "UPDATE jobs SET category='CMS' WHERE category='CMS / WordPress'"
+        )
         await db.commit()
 
+
+# ── Jobs ─────────────────────────────────────────────────────────────────────
 
 async def upsert_jobs(jobs: list[Job]):
     async with aiosqlite.connect(DB_PATH) as db:
@@ -58,7 +88,7 @@ async def upsert_jobs(jobs: list[Job]):
         await db.commit()
 
 
-async def update_verdict(job: Job):
+async def update_verdict(job: Job, provider: str = ""):
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("""
             UPDATE jobs SET verdict=?, verdict_reason=?, complexity=?,
@@ -69,7 +99,12 @@ async def update_verdict(job: Job):
         await db.commit()
 
 
-async def get_all_jobs(category: str = None, verdict: str = None) -> list[dict]:
+async def get_all_jobs(
+    category: str = None,
+    verdict: str = None,
+    analyzed: str = None,
+    sort: str = "desc",
+) -> list[dict]:
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         where = []
@@ -80,10 +115,14 @@ async def get_all_jobs(category: str = None, verdict: str = None) -> list[dict]:
         if verdict and verdict != "all":
             where.append("verdict = ?")
             params.append(verdict.upper())
+        if analyzed is not None and analyzed != "all":
+            where.append("analyzed = ?")
+            params.append(1 if analyzed == "1" else 0)
+        order = "DESC" if sort != "asc" else "ASC"
         sql = "SELECT * FROM jobs"
         if where:
             sql += " WHERE " + " AND ".join(where)
-        sql += " ORDER BY scraped_at DESC LIMIT 500"
+        sql += f" ORDER BY scraped_at {order} LIMIT 500"
         async with db.execute(sql, params) as cur:
             rows = await cur.fetchall()
             return [dict(r) for r in rows]
@@ -100,7 +139,7 @@ async def get_unanalyzed_jobs() -> list[Job]:
                 jobs.append(Job(
                     id=r["id"], title=r["title"], description=r["description"],
                     url=r["url"], source=r["source"],
-                    category=Category(r["category"]),
+                    category=_safe_category(r["category"]),
                     budget_raw=r["budget_raw"] or "",
                     budget_min=r["budget_min"], budget_max=r["budget_max"],
                     posted_at=r["posted_at"] or "",
@@ -109,6 +148,12 @@ async def get_unanalyzed_jobs() -> list[Job]:
                     analyzed=bool(r["analyzed"]),
                 ))
             return jobs
+
+
+async def get_unanalyzed_count() -> int:
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("SELECT COUNT(*) FROM jobs WHERE analyzed=0") as c:
+            return (await c.fetchone())[0]
 
 
 async def get_stats() -> dict:
@@ -120,3 +165,43 @@ async def get_stats() -> dict:
         async with db.execute("SELECT COUNT(*) FROM jobs WHERE verdict='TAKE'") as c:
             take = (await c.fetchone())[0]
         return {"total": total, "analyzed": analyzed, "take": take}
+
+
+async def reset_all_analysis():
+    """Сбросить статус анализа для всех заказов — очистить вердикты и выставить analyzed=0."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("""
+            UPDATE jobs SET
+                analyzed=0,
+                verdict='UNKNOWN',
+                verdict_reason='',
+                complexity=0,
+                estimated_hours=0
+        """)
+        await db.commit()
+
+
+# ── Settings ─────────────────────────────────────────────────────────────────
+
+async def get_setting(key: str, default: str = "") -> str:
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("SELECT value FROM settings WHERE key=?", (key,)) as c:
+            row = await c.fetchone()
+            return row[0] if row else default
+
+
+async def set_setting(key: str, value: str):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "INSERT INTO settings (key, value) VALUES (?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            (key, value),
+        )
+        await db.commit()
+
+
+async def get_all_settings() -> dict:
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("SELECT key, value FROM settings") as c:
+            rows = await c.fetchall()
+            return dict(rows)
