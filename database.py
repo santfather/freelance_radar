@@ -1,6 +1,5 @@
 """SQLite cache for scraped jobs and settings."""
 
-import json
 import os
 import aiosqlite
 from models import Job, Category, Verdict
@@ -8,15 +7,8 @@ from models import Job, Category, Verdict
 DB_PATH = os.getenv("DB_PATH", "radar.db")
 
 
-# Map old category names to new ones (for backward compatibility)
-_OLD_CATEGORY_MAP = {
-    "CMS / WordPress": "CMS",
-}
-
-
 def _safe_category(name: str) -> Category:
-    """Convert string to Category, handling old/unknown names."""
-    name = _OLD_CATEGORY_MAP.get(name, name)
+    """Convert string to Category, handling unknown names."""
     try:
         return Category(name)
     except ValueError:
@@ -54,10 +46,11 @@ async def init_db():
                 value TEXT NOT NULL
             )
         """)
-        # Migration: rename old category values
-        await db.execute(
-            "UPDATE jobs SET category='CMS' WHERE category='CMS / WordPress'"
-        )
+        # Performance indexes
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_jobs_analyzed ON jobs(analyzed)")
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_jobs_verdict ON jobs(verdict)")
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_jobs_category ON jobs(category)")
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_jobs_scraped_at ON jobs(scraped_at)")
         await db.commit()
 
 
@@ -88,7 +81,7 @@ async def upsert_jobs(jobs: list[Job]):
         await db.commit()
 
 
-async def update_verdict(job: Job, provider: str = ""):
+async def update_verdict(job: Job):
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("""
             UPDATE jobs SET verdict=?, verdict_reason=?, complexity=?,
@@ -131,7 +124,7 @@ async def get_all_jobs(
 async def get_unanalyzed_jobs() -> list[Job]:
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
-        async with db.execute("SELECT * FROM jobs WHERE analyzed=0") as cur:
+        async with db.execute("SELECT * FROM jobs WHERE analyzed=0 LIMIT 100") as cur:
             rows = await cur.fetchall()
             jobs = []
             for r in rows:
@@ -158,13 +151,15 @@ async def get_unanalyzed_count() -> int:
 
 async def get_stats() -> dict:
     async with aiosqlite.connect(DB_PATH) as db:
-        async with db.execute("SELECT COUNT(*) FROM jobs") as c:
-            total = (await c.fetchone())[0]
-        async with db.execute("SELECT COUNT(*) FROM jobs WHERE analyzed=1") as c:
-            analyzed = (await c.fetchone())[0]
-        async with db.execute("SELECT COUNT(*) FROM jobs WHERE verdict='TAKE'") as c:
-            take = (await c.fetchone())[0]
-        return {"total": total, "analyzed": analyzed, "take": take}
+        async with db.execute("""
+            SELECT
+                COUNT(*) AS total,
+                IFNULL(SUM(CASE WHEN analyzed=1 THEN 1 ELSE 0 END), 0) AS analyzed,
+                IFNULL(SUM(CASE WHEN verdict='TAKE' THEN 1 ELSE 0 END), 0) AS take
+            FROM jobs
+        """) as c:
+            row = await c.fetchone()
+            return {"total": row[0], "analyzed": row[1], "take": row[2]}
 
 
 async def reset_all_analysis():

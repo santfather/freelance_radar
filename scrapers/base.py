@@ -71,6 +71,24 @@ class BaseScraper(ABC):
     def __init__(self, timeout: int = 20, delay: tuple = (1, 3)):
         self.timeout = timeout
         self.delay = delay
+        self.seen: set[str] = set()
+
+    def _make_job(self, title: str, url: str, description: str = "",
+                  budget_raw: str = "", budget_min: Optional[int] = None,
+                  budget_max: Optional[int] = None,
+                  posted_at: str = "") -> Job:
+        return Job(
+            id=make_id(title, self.source_name),
+            title=title,
+            description=description,
+            url=url,
+            source=self.source_name,
+            category=detect_category(title, description),
+            budget_raw=budget_raw,
+            budget_min=budget_min,
+            budget_max=budget_max,
+            posted_at=posted_at,
+        )
 
     async def _get(self, url: str, cookies: dict = None, **kwargs) -> Optional[httpx.Response]:
         headers = {

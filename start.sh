@@ -26,4 +26,4 @@ echo "🚀 Запускаю Freelance Radar на http://localhost:8099"
 echo "   Нажми Ctrl+C для остановки"
 echo ""
 
-uvicorn main:app --port 8099 --host 0.0.0.0
+uvicorn main:app --port 8099 --host 127.0.0.1

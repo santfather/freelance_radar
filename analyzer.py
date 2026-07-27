@@ -7,7 +7,7 @@ from abc import ABC, abstractmethod
 
 import httpx
 
-from models import Job, Verdict
+from models import Job
 
 # ── Промпты (общие для всех анализаторов) ────────────────────────────────────
 
@@ -52,6 +52,21 @@ class BaseAnalyzer(ABC):
         """Вернуть словарь с ключами: verdict, reason, complexity, estimated_hours."""
         ...
 
+    def _build_prompt(self, title: str, category: str, budget: str, description: str) -> str:
+        return USER_TEMPLATE.format(
+            title=title, category=category,
+            budget=budget or "not specified",
+            description=description[:600] if description else "no description",
+        )
+
+    def _error_result(self, error_msg: str) -> dict:
+        return {
+            "verdict": "UNKNOWN",
+            "reason": error_msg,
+            "complexity": 0,
+            "estimated_hours": 0,
+        }
+
 
 # ── Вспомогательная функция парсинга ответа ──────────────────────────────────
 
@@ -90,11 +105,7 @@ class OllamaAnalyzer(BaseAnalyzer):
         self.model = os.getenv("OLLAMA_MODEL", "mistral")
 
     async def analyze(self, title: str, category: str, budget: str, description: str) -> dict:
-        prompt = USER_TEMPLATE.format(
-            title=title, category=category,
-            budget=budget or "not specified",
-            description=description[:600] if description else "no description",
-        )
+        prompt = self._build_prompt(title, category, budget, description)
         try:
             async with httpx.AsyncClient() as client:
                 try:
@@ -107,12 +118,7 @@ class OllamaAnalyzer(BaseAnalyzer):
                         raise
             return _extract_result(raw)
         except Exception as e:
-            return {
-                "verdict": "UNKNOWN",
-                "reason": f"Ollama error: {e}",
-                "complexity": 0,
-                "estimated_hours": 0,
-            }
+            return self._error_result(f"Ollama error: {e}")
 
     async def _call_chat(self, client: httpx.AsyncClient, prompt: str) -> str:
         payload = {
@@ -171,18 +177,9 @@ class DeepSeekAnalyzer(BaseAnalyzer):
         self.base_url = "https://api.deepseek.com/v1"
 
     async def analyze(self, title: str, category: str, budget: str, description: str) -> dict:
-        prompt = USER_TEMPLATE.format(
-            title=title, category=category,
-            budget=budget or "not specified",
-            description=description[:600] if description else "no description",
-        )
+        prompt = self._build_prompt(title, category, budget, description)
         if not self.api_key:
-            return {
-                "verdict": "UNKNOWN",
-                "reason": "DeepSeek API key not configured",
-                "complexity": 0,
-                "estimated_hours": 0,
-            }
+            return self._error_result("DeepSeek API key not configured")
         try:
             async with httpx.AsyncClient() as client:
                 payload = {
@@ -204,12 +201,7 @@ class DeepSeekAnalyzer(BaseAnalyzer):
                 raw = resp.json()["choices"][0]["message"]["content"]
             return _extract_result(raw)
         except Exception as e:
-            return {
-                "verdict": "UNKNOWN",
-                "reason": f"DeepSeek error: {e}",
-                "complexity": 0,
-                "estimated_hours": 0,
-            }
+            return self._error_result(f"DeepSeek error: {e}")
 
 
 async def check_deepseek_available() -> tuple[bool, str]:
@@ -239,18 +231,9 @@ class GeminiAnalyzer(BaseAnalyzer):
         self.model = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 
     async def analyze(self, title: str, category: str, budget: str, description: str) -> dict:
-        prompt = USER_TEMPLATE.format(
-            title=title, category=category,
-            budget=budget or "not specified",
-            description=description[:600] if description else "no description",
-        )
+        prompt = self._build_prompt(title, category, budget, description)
         if not self.api_key:
-            return {
-                "verdict": "UNKNOWN",
-                "reason": "Gemini API key not configured",
-                "complexity": 0,
-                "estimated_hours": 0,
-            }
+            return self._error_result("Gemini API key not configured")
         try:
             full_prompt = f"{SYSTEM_PROMPT}\n\n{prompt}"
             async with httpx.AsyncClient() as client:
@@ -274,12 +257,7 @@ class GeminiAnalyzer(BaseAnalyzer):
                 raw = data.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "{}")
             return _extract_result(raw)
         except Exception as e:
-            return {
-                "verdict": "UNKNOWN",
-                "reason": f"Gemini error: {e}",
-                "complexity": 0,
-                "estimated_hours": 0,
-            }
+            return self._error_result(f"Gemini error: {e}")
 
 
 async def check_gemini_available() -> tuple[bool, str]:

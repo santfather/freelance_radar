@@ -10,7 +10,7 @@ import logging
 from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, BackgroundTasks, Query
+from fastapi import FastAPI, BackgroundTasks, Depends, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
 load_dotenv()
@@ -43,117 +43,117 @@ from database import (
     reset_all_analysis,
 )
 from scrapers import ALL_SCRAPERS
+from services.state import AppState
 
-# ── Global state ──────────────────────────────────────────────────────────────
-_is_scraping = False
-_is_analyzing = False
-_scrape_log: list[str] = []
-_analyze_log: list[str] = []
-_analyze_progress = 0
-_analyze_total = 0
-_scrape_running = False
-_analyze_running = False
-_analyze_current_provider = ""
 
+# ── Зависимость состояния ─────────────────────────────────────────────────────
+
+async def get_state(request: Request) -> AppState:
+    return request.app.state.app_state
+
+
+# ── Lifespan ──────────────────────────────────────────────────────────────────
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    app.state.app_state = AppState()
     await init_db()
     yield
 
 
 app = FastAPI(title="Freelance Radar", lifespan=lifespan)
 
+BATCH_SIZE = 10
+
 
 # ── Background tasks ──────────────────────────────────────────────────────────
 
-async def _run_scrape():
+async def _run_scrape(state: AppState):
     """Только парсинг (без анализа)."""
-    global _is_scraping, _scrape_log, _scrape_running
-    if _scrape_running:
+    if state.scraping:
         return
-    _scrape_running = True
-    _is_scraping = True
-    _scrape_log = ["▶ Парсинг запущен..."]
+    state.scraping = True
+    state.scrape_log = ["▶ Парсинг запущен..."]
     try:
         all_jobs = []
         for ScraperClass in ALL_SCRAPERS:
             scraper = ScraperClass()
             jobs = await scraper.scrape()
             all_jobs.extend(jobs)
-            _scrape_log.append(f"✓ {scraper.source_name}: {len(jobs)} заказов")
+            state.scrape_log.append(f"✓ {scraper.source_name}: {len(jobs)} заказов")
 
         await upsert_jobs(all_jobs)
-        _scrape_log.append(f"💾 Сохранено {len(all_jobs)} заказов в БД")
+        state.scrape_log.append(f"💾 Сохранено {len(all_jobs)} заказов в БД")
 
         pending = await get_unanalyzed_count()
-        _scrape_log.append(f"📊 Ожидают анализа: {pending}")
+        state.scrape_log.append(f"📊 Ожидают анализа: {pending}")
 
-        _scrape_log.append("✅ Парсинг завершён!")
+        state.scrape_log.append("✅ Парсинг завершён!")
         logger.info(f"Scraping done: {len(all_jobs)} jobs, {pending} unanalyzed")
     except Exception as e:
-        _scrape_log.append(f"❌ Ошибка парсинга: {e}")
+        state.scrape_log.append(f"❌ Ошибка парсинга: {e}")
         logger.error(f"Scraping error: {e}")
     finally:
-        _scrape_running = False
-        _is_scraping = False
+        state.scraping = False
 
 
-async def _run_analysis(provider: str):
-    """Анализ всех непроанализированных заказов через указанного провайдера."""
-    global _is_analyzing, _analyze_log, _analyze_progress, _analyze_total, _analyze_running, _analyze_current_provider
-    if _analyze_running:
+def _init_analysis(state: AppState, provider: str):
+    state.analyze_log = [f"▶ Анализ запущен (провайдер: {PROVIDER_NAMES.get(provider, provider)})..."]
+    state.analyze_progress = 0
+    state.analyze_total = 0
+    state.analyze_provider = provider
+
+
+def _finalize_analysis(state: AppState):
+    state.analyzing = False
+    state.analyze_provider = ""
+    state.analyze_log.append(f"✅ Проанализировано {state.analyze_total} заказов")
+
+
+async def _process_batch(analyzer, batch, state: AppState):
+    tasks = [_analyze_one_job(analyzer, job) for job in batch]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    for job, result in zip(batch, results):
+        if isinstance(result, Exception):
+            state.analyze_log.append(f"  ❌ Ошибка: {result}")
+            logger.error(f"Analysis error for job {job.id}: {result}")
+        else:
+            await update_verdict(job)
+            state.analyze_log.append(f"  → {job.verdict.value}")
+        state.analyze_progress += 1
+
+
+async def _process_all_batches(analyzer, state: AppState):
+    unanalyzed = await get_unanalyzed_jobs()
+    state.analyze_total = len(unanalyzed)
+    state.analyze_log.append(f"📊 Найдено {state.analyze_total} заказов для анализа")
+
+    if not unanalyzed:
+        state.analyze_log.append("✅ Нет заказов для анализа")
         return
-    _analyze_running = True
-    _is_analyzing = True
-    _analyze_current_provider = provider
-    _analyze_log = [f"▶ Анализ запущен (провайдер: {PROVIDER_NAMES.get(provider, provider)})..."]
-    _analyze_progress = 0
-    _analyze_total = 0
 
+    for batch_start in range(0, len(unanalyzed), BATCH_SIZE):
+        batch = unanalyzed[batch_start:batch_start + BATCH_SIZE]
+        await _process_batch(analyzer, batch, state)
+
+
+async def _run_analysis(provider: str, state: AppState):
+    """Анализ всех непроанализированных заказов через указанного провайдера."""
+    if state.analyzing:
+        return
+    state.analyzing = True
+    _init_analysis(state, provider)
     try:
         analyzer = get_analyzer(provider)
-        unanalyzed = await get_unanalyzed_jobs()
-        _analyze_total = len(unanalyzed)
-        _analyze_log.append(f"📊 Найдено {_analyze_total} заказов для анализа")
-
-        if not unanalyzed:
-            _analyze_log.append("✅ Нет заказов для анализа")
-            return
-
-        # Обработка пачками по 10 параллельно
-        BATCH_SIZE = 10
-        for batch_start in range(0, len(unanalyzed), BATCH_SIZE):
-            batch = unanalyzed[batch_start:batch_start + BATCH_SIZE]
-            tasks = []
-            for job in batch:
-                title_preview = job.title[:50]
-                _analyze_log.append(f"  [{_analyze_progress + 1}/{_analyze_total}] Анализ: {title_preview}")
-                tasks.append(_analyze_one_job(analyzer, job))
-
-            results = await asyncio.gather(*tasks, return_exceptions=True)
-
-            for job, result in zip(batch, results):
-                if isinstance(result, Exception):
-                    _analyze_log.append(f"  ❌ Ошибка: {result}")
-                    logger.error(f"Analysis error for job {job.id}: {result}")
-                else:
-                    await update_verdict(job)
-                    _analyze_log.append(f"  → {job.verdict.value}")
-                _analyze_progress += 1
-
-        _analyze_log.append(f"✅ Проанализировано {_analyze_total} заказов")
-        logger.info(f"Analysis done: {_analyze_total} jobs via {provider}")
+        await _process_all_batches(analyzer, state)
     except ValueError as e:
-        _analyze_log.append(f"❌ Неизвестный провайдер: {e}")
+        state.analyze_log.append(f"❌ Неизвестный провайдер: {e}")
         logger.error(f"Analysis provider error: {e}")
     except Exception as e:
-        _analyze_log.append(f"❌ Ошибка анализа: {e}")
+        state.analyze_log.append(f"❌ Ошибка анализа: {e}")
         logger.error(f"Analysis error: {e}")
     finally:
-        _analyze_running = False
-        _is_analyzing = False
-        _analyze_current_provider = ""
+        _finalize_analysis(state)
 
 
 async def _analyze_one_job(analyzer, job):
@@ -185,12 +185,14 @@ async def index():
 
 
 @app.post("/api/refresh")
-async def refresh(background_tasks: BackgroundTasks):
+async def refresh(
+    background_tasks: BackgroundTasks,
+    state: AppState = Depends(get_state),
+):
     """Только парсинг (без анализа)."""
-    global _scrape_running
-    if _scrape_running:
+    if state.scraping:
         return JSONResponse({"status": "already_running"})
-    background_tasks.add_task(_run_scrape)
+    background_tasks.add_task(_run_scrape, state)
     return JSONResponse({"status": "started"})
 
 
@@ -199,14 +201,14 @@ async def analyze(
     background_tasks: BackgroundTasks,
     provider: str = Query(default=""),
     force: bool = Query(default=False),
+    state: AppState = Depends(get_state),
 ):
     """Запустить анализ заказов.
 
     Параметр provider опционален — если не указан, берётся из сохранённой настройки.
     Параметр force=true — сбрасывает старые вердикты и переанализирует все заказы заново.
     """
-    global _analyze_running
-    if _analyze_running:
+    if state.analyzing:
         return JSONResponse({"status": "already_running"})
 
     if not provider:
@@ -215,7 +217,7 @@ async def analyze(
     if force:
         await reset_all_analysis()
 
-    background_tasks.add_task(_run_analysis, provider)
+    background_tasks.add_task(_run_analysis, provider, state)
     mode = "reanalysis" if force else "analysis"
     return JSONResponse({"status": f"{mode}_started", "provider": provider})
 
@@ -232,24 +234,24 @@ async def jobs(
 
 
 @app.get("/api/stats")
-async def stats():
+async def stats(state: AppState = Depends(get_state)):
     data = await get_stats()
     unanalyzed = await get_unanalyzed_count()
     data["unanalyzed"] = unanalyzed
-    data["scraping"] = _scrape_running
-    data["analyzing"] = _analyze_running
-    data["analyze_progress"] = _analyze_progress
-    data["analyze_total"] = _analyze_total
-    data["analyze_provider"] = _analyze_current_provider
+    data["scraping"] = state.scraping
+    data["analyzing"] = state.analyzing
+    data["analyze_progress"] = state.analyze_progress
+    data["analyze_total"] = state.analyze_total
+    data["analyze_provider"] = state.analyze_provider
 
     # Показываем лог в зависимости от того, что сейчас работает
-    if _scrape_running:
-        data["log"] = _scrape_log[-10:]
-    elif _analyze_running:
-        data["log"] = _analyze_log[-10:]
+    if state.scraping:
+        data["log"] = state.scrape_log[-10:]
+    elif state.analyzing:
+        data["log"] = state.analyze_log[-10:]
     else:
         # Показываем последний лог (приоритет анализу, потом парсингу)
-        data["log"] = _analyze_log[-10:] if _analyze_log else _scrape_log[-10:]
+        data["log"] = state.analyze_log[-10:] if state.analyze_log else state.scrape_log[-10:]
 
     # Проверка доступности провайдера
     provider = await get_setting("llm_provider", "ollama")
@@ -277,26 +279,26 @@ async def stats():
 
 
 @app.get("/api/log")
-async def log():
+async def log(state: AppState = Depends(get_state)):
     return JSONResponse({
-        "scrape_log": _scrape_log,
-        "analyze_log": _analyze_log,
-        "scraping": _scrape_running,
-        "analyzing": _analyze_running,
-        "analyze_progress": _analyze_progress,
-        "analyze_total": _analyze_total,
+        "scrape_log": state.scrape_log,
+        "analyze_log": state.analyze_log,
+        "scraping": state.scraping,
+        "analyzing": state.analyzing,
+        "analyze_progress": state.analyze_progress,
+        "analyze_total": state.analyze_total,
     })
 
 
 @app.get("/api/status")
-async def status():
+async def status(state: AppState = Depends(get_state)):
     """Статус фоновых задач."""
     return JSONResponse({
-        "scraping": _scrape_running,
-        "analyzing": _analyze_running,
-        "analyze_progress": _analyze_progress,
-        "analyze_total": _analyze_total,
-        "analyze_provider": _analyze_current_provider,
+        "scraping": state.scraping,
+        "analyzing": state.analyzing,
+        "analyze_progress": state.analyze_progress,
+        "analyze_total": state.analyze_total,
+        "analyze_provider": state.analyze_provider,
     })
 
 
