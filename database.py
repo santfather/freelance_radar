@@ -4,17 +4,9 @@ import os
 from typing import Optional
 
 import aiosqlite
-from models import Job, Category, Verdict
+from models import Job
 
 DB_PATH = os.getenv("DB_PATH", "radar.db")
-
-
-def _safe_category(name: str) -> Category:
-    """Convert string to Category, handling unknown names."""
-    try:
-        return Category(name)
-    except ValueError:
-        return Category.OTHER_IT
 
 
 async def init_db():
@@ -64,7 +56,7 @@ async def init_db():
                 deepseek_api_key TEXT DEFAULT '',
                 deepseek_model TEXT DEFAULT 'deepseek-chat',
                 gemini_api_key TEXT DEFAULT '',
-                gemini_model TEXT DEFAULT 'gemini-1.5-flash',
+                gemini_model TEXT DEFAULT 'gemini-2.5-flash',
                 ollama_model TEXT DEFAULT 'qwen2.5:14b',
                 ollama_host TEXT DEFAULT 'http://localhost:11434',
                 FOREIGN KEY (user_id) REFERENCES users(id)
@@ -119,6 +111,8 @@ async def get_all_jobs(
     verdict: Optional[str] = None,
     analyzed: Optional[bool] = None,
     sort: str = "desc",
+    limit: int = 500,
+    offset: int = 0,
 ) -> list[dict]:
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
@@ -133,14 +127,42 @@ async def get_all_jobs(
         if analyzed is not None:
             where.append("analyzed = ?")
             params.append(1 if analyzed else 0)
-        order = "DESC" if sort != "asc" else "ASC"
         sql = "SELECT * FROM jobs"
         if where:
             sql += " WHERE " + " AND ".join(where)
-        sql += f" ORDER BY scraped_at {order} LIMIT 500"
+        if sort != "asc":
+            sql += " ORDER BY scraped_at DESC"
+        else:
+            sql += " ORDER BY scraped_at ASC"
+        sql += " LIMIT ? OFFSET ?"
+        params.extend([limit, offset])
         async with db.execute(sql, params) as cur:
             rows = await cur.fetchall()
             return [dict(r) for r in rows]
+
+
+async def get_jobs_count(
+    category: Optional[str] = None,
+    verdict: Optional[str] = None,
+    analyzed: Optional[bool] = None,
+) -> int:
+    async with aiosqlite.connect(DB_PATH) as db:
+        where = []
+        params = []
+        if category:
+            where.append("category = ?")
+            params.append(category)
+        if verdict:
+            where.append("verdict = ?")
+            params.append(verdict.upper())
+        if analyzed is not None:
+            where.append("analyzed = ?")
+            params.append(1 if analyzed else 0)
+        sql = "SELECT COUNT(*) FROM jobs"
+        if where:
+            sql += " WHERE " + " AND ".join(where)
+        async with db.execute(sql, params) as c:
+            return (await c.fetchone())[0]
 
 
 async def get_unanalyzed_jobs() -> list[Job]:
@@ -148,21 +170,7 @@ async def get_unanalyzed_jobs() -> list[Job]:
         db.row_factory = aiosqlite.Row
         async with db.execute("SELECT * FROM jobs WHERE analyzed=0 LIMIT 100") as cur:
             rows = await cur.fetchall()
-            jobs = []
-            for r in rows:
-                r = dict(r)
-                jobs.append(Job(
-                    id=r["id"], title=r["title"], description=r["description"],
-                    url=r["url"], source=r["source"],
-                    category=_safe_category(r["category"]),
-                    budget_raw=r["budget_raw"] or "",
-                    budget_min=r["budget_min"], budget_max=r["budget_max"],
-                    posted_at=r["posted_at"] or "",
-                    verdict=Verdict(r["verdict"]),
-                    verdict_reason=r["verdict_reason"] or "",
-                    analyzed=bool(r["analyzed"]),
-                ))
-            return jobs
+            return [Job.from_db_row(dict(r)) for r in rows]
 
 
 async def get_unanalyzed_count() -> int:
@@ -281,7 +289,7 @@ async def get_user_settings(user_id: int) -> dict:
             "deepseek_api_key": "",
             "deepseek_model": "deepseek-chat",
             "gemini_api_key": "",
-            "gemini_model": "gemini-1.5-flash",
+            "gemini_model": "gemini-2.5-flash",
             "ollama_model": "qwen2.5:14b",
             "ollama_host": "http://localhost:11434",
         }

@@ -22,6 +22,7 @@
 - **Настройки LLM через UI:** управление API-ключами и моделями для каждого провайдера
   прямо из браузера, с проверкой подключения (Test Connection)
 - **Без Playwright:** парсинг статического HTML через httpx + BeautifulSoup, без браузера
+- **Ведётся аудит кода:** актуальные проблемы и план рефакторинга — в [AUDIT2.md](AUDIT2.md) и [need_to_fix.md](need_to_fix.md)
 
 ## Быстрый старт
 
@@ -50,7 +51,7 @@ cp .env.example .env
 #   python3 -c "import secrets; print(secrets.token_urlsafe(32))"
 
 # 5. Запустить
-uvicorn main:app --port 8099 --host 0.0.0.0
+uvicorn main:app --port 8099 --host 127.0.0.1
 ```
 
 Открой `http://localhost:8099` в браузере.
@@ -177,17 +178,21 @@ freelance-radar/
 │   ├── upwork.py        # Upwork.com (listing + RSS fallback)
 │   └── toptal.py        # Toptal.com (JSON-LD + HTML links)
 ├── services/
-│   └── state.py         # AppState — in-memory состояние (парсинг/анализ)
+│   ├── __init__.py
+│   └── state.py         # AppState — датакласс состояния (парсинг/анализ/лог)
 ├── templates/
-│   └── index.html       # SPA фронтенд (HTML + CSS + Vanilla JS)
+│   └── index.html       # SPA фронтенд (только HTML, ~270 строк)
 ├── static/
 │   ├── app.js           # Клиентская логика (заказы, аутентификация, настройки)
-│   └── styles.css       # Кавайная тема
-├── start.sh             # Скрипт запуска
+│   └── styles.css       # Кавайная тема (~1678 строк, рекомендуется дефрагментация)
+├── start.sh             # Скрипт запуска (создаёт venv, запускает uvicorn)
 ├── radar.db             # SQLite БД (создаётся автоматически)
-├── requirements.txt     # Зависимости Python
+├── requirements.txt     # Зависимости Python (только нужные: httpx, fastapi и др.)
 ├── .env.example         # Шаблон конфигурации
 ├── .env                 # Конфигурация (не коммитится)
+├── AUDIT.md             # Первый аудит кода
+├── AUDIT2.md            # Повторный аудит кода
+├── need_to_fix.md       # Актуальный список необходимых исправлений
 ├── README.md            # Этот файл
 ├── ROADMAP.md           # План развития
 └── .gitignore
@@ -211,7 +216,7 @@ freelance-radar/
 ### Безопасность
 
 - Пароли хешируются bcrypt
-- JWT-токены с алгоритмом HS256 и сроком жизни 365 дней
+- JWT-токены с алгоритмом HS256 (срок жизни настраивается в `auth.py`, `JWT_EXPIRE_DAYS`)
 - API-ключи хранятся в БД в открытом виде (для локального использования;
   рекомендуется не передавать БД третьим лицам)
 - Все эндпоинты настроек и тестирования защищены JWT-аутентификацией
@@ -234,12 +239,12 @@ python3 -c "import py_compile; py_compile.compile('main.py', doraise=True); prin
 
 | Компонент | Технология |
 |---|---|
-| **Веб-фреймворк** | FastAPI + uvicorn |
+| **Веб-фреймворк** | FastAPI + uvicorn (через httpx, без SDK провайдеров) |
 | **База данных** | SQLite (aiosqlite) |
 | **Аутентификация** | JWT (python-jose) + bcrypt |
 | **Фронтенд** | HTML + CSS + Vanilla JS (без фреймворков) |
 | **Парсинг** | httpx + BeautifulSoup4 + lxml |
-| **LLM** | Ollama / DeepSeek API / Gemini API |
+| **LLM** | Ollama / DeepSeek API / Gemini API (все через httpx) |
 | **Асинхронность** | asyncio, BackgroundTasks |
 
 ## Дорожная карта

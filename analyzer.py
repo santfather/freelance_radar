@@ -65,6 +65,18 @@ class BaseAnalyzer(ABC):
             "estimated_hours": 0,
         }
 
+    async def _call_llm(self, url: str, payload: dict, headers: dict | None = None, timeout: int = 90) -> str:
+        """Универсальный HTTP-вызов к LLM API.
+        
+        Возвращает сырой текст ответа. headers могут быть None (для Ollama без ключа).
+        """
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(
+                url, json=payload, headers=headers or {}, timeout=timeout,
+            )
+            resp.raise_for_status()
+            return resp.text
+
 
 # ── Вспомогательная функция парсинга ответа ──────────────────────────────────
 
@@ -100,7 +112,7 @@ class OllamaAnalyzer(BaseAnalyzer):
 
     def __init__(self, model: str | None = None, host: str | None = None):
         self.host = host or os.getenv("OLLAMA_HOST", "http://localhost:11434")
-        self.model = model or os.getenv("OLLAMA_MODEL", "mistral")
+        self.model = model or os.getenv("OLLAMA_MODEL", "qwen2.5:14b")
 
     async def analyze(self, title: str, category: str, budget: str, description: str) -> dict:
         prompt = self._build_prompt(title, category, budget, description)
@@ -149,9 +161,9 @@ class OllamaAnalyzer(BaseAnalyzer):
 async def check_ollama_available(model: str | None = None, host: str | None = None) -> tuple[bool, str]:
     """Проверить, доступна ли Ollama и нужная модель."""
     host = host or os.getenv("OLLAMA_HOST", "http://localhost:11434")
-    model = model or os.getenv("OLLAMA_MODEL", "mistral")
+    model = model or os.getenv("OLLAMA_MODEL", "qwen2.5:14b")
     try:
-        async with httpx.AsyncClient(timeout=5) as client:
+        async with httpx.AsyncClient(timeout=15) as client:
             resp = await client.get(f"{host}/api/tags")
             resp.raise_for_status()
             models = [m["name"] for m in resp.json().get("models", [])]
@@ -266,8 +278,10 @@ async def check_gemini_available(api_key: str | None = None) -> tuple[bool, str]
         return False, "Gemini API key not set"
     try:
         async with httpx.AsyncClient(timeout=10) as client:
+            headers = {"X-Goog-Api-Key": key}
             resp = await client.get(
-                f"https://generativelanguage.googleapis.com/v1beta/models?key={key}",
+                "https://generativelanguage.googleapis.com/v1beta/models",
+                headers=headers,
             )
             resp.raise_for_status()
             return True, "Gemini API OK"

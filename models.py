@@ -39,6 +39,23 @@ class Job:
     estimated_hours: int = 0
     analyzed: bool = False
 
+    @classmethod
+    def from_db_row(cls, row: dict) -> "Job":
+        """Создать Job из строки БД (словаря). Устраняет дублирование маппинга."""
+        return cls(
+            id=row["id"], title=row["title"], description=row["description"],
+            url=row["url"], source=row["source"],
+            category=Category(row["category"]) if row.get("category") in (c.value for c in Category) else Category.OTHER_IT,
+            budget_raw=row.get("budget_raw") or "",
+            budget_min=row.get("budget_min"), budget_max=row.get("budget_max"),
+            posted_at=row.get("posted_at") or "",
+            verdict=Verdict(row["verdict"]) if row.get("verdict") in (v.value for v in Verdict) else Verdict.UNKNOWN,
+            verdict_reason=row.get("verdict_reason") or "",
+            complexity=row.get("complexity") or 0,
+            estimated_hours=row.get("estimated_hours") or 0,
+            analyzed=bool(row.get("analyzed", 0)),
+        )
+
     def to_dict(self) -> dict:
         return {
             "id": self.id,
@@ -88,3 +105,4 @@ class TestConnectionRequest(BaseModel):
     provider: str
     api_key: str | None = None
     model: str | None = None
+    host: str | None = None  # для Ollama — отдельный хост вместо api_key

@@ -18,8 +18,6 @@
 <div class="cloud cloud-1"></div>
 <div class="cloud cloud-2"></div>
 <div class="cloud cloud-3"></div>
-<div id="kawaii-unicorn" class="kawaii-unicorn">🦄</div>
-
 <!-- 🦄🏃‍♂️ Бегущий единорог (появляется при парсинге/анализе) -->
 <div id="running-unicorn">
   <div class="unicorn-body">
@@ -38,31 +36,28 @@
   <div class="header-brand">
     <div class="logo-icon">🎯</div>
     <h1>Freelance <span>Radar</span> <span class="sparkle">✨</span></h1>
+    <div class="header-subtitle">Твой кавайный помощник в мире фриланса ✨</div>
+    <span class="header-divider"></span>
+    <span id="provider-status" class="provider-status unknown">⏳ Проверка...</span>
   </div>
-  <div class="header-subtitle">✨ Твой кавайный помощник в мире фриланса ✨</div>
   <div class="stats">
-    <div class="stat stat-total">
+    <div class="stat">
       <div class="stat-emoji">📦</div>
       <div class="val" id="stat-total">—</div>
-      <div class="lbl">Всего</div>
     </div>
     <div class="stat stat-analyzed">
       <div class="stat-emoji">🔬</div>
       <div class="val" id="stat-analyzed">—</div>
-      <div class="lbl">Проанализировано</div>
     </div>
     <div class="stat stat-unanalyzed">
       <div class="stat-emoji">⏳</div>
       <div class="val" id="stat-unanalyzed" style="color:var(--unknown)">—</div>
-      <div class="lbl">В очереди</div>
     </div>
     <div class="stat stat-take">
       <div class="stat-emoji">💖</div>
       <div class="val" style="color:var(--take)" id="stat-take">—</div>
-      <div class="lbl">БРАТЬ 💕</div>
     </div>
   </div>
-  <div id="provider-status" class="provider-status unknown">⏳ Проверка...</div>
 </header>
 
 <div class="status-bar">
@@ -125,6 +120,15 @@
   <button class="btn-icon" id="btn-sort" onclick="toggleSort()" title="Сортировка">↑ Новые</button>
   <button class="btn-icon active" id="btn-grid" onclick="setView('grid')" title="Плитки">⊞</button>
   <button class="btn-icon" id="btn-list" onclick="setView('list')" title="Список">≡</button>
+
+  <span class="pagination-size-wrap">
+    <label for="page-size-select">📄 Показать:</label>
+    <select id="page-size-select" onchange="changePageSize(this.value)">
+      <option value="10">10</option>
+      <option value="20">20</option>
+      <option value="30">30</option>
+    </select>
+  </span>
 </div>
 
 <div id="log-container" class="log-container">
@@ -149,6 +153,14 @@
 <!-- 📋 Вкладка "Заказы" -->
 <div class="content" id="jobs-content">
   <div class="empty">🌸 Нажми «Запустить парсинг» чтобы собрать заказы 🌸</div>
+</div>
+
+<!-- 📄 Пагинация -->
+<div class="pagination-bar" id="pagination-bar">
+  <div class="pagination-info">
+    Всего: <span id="page-total">0</span> заказов
+  </div>
+  <div class="pagination-nav" id="pagination-nav"></div>
 </div>
 
 <!-- ⚙️ Вкладка "Настройки" -->

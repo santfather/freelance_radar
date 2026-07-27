@@ -39,6 +39,7 @@ from database import (
     upsert_jobs,
     update_verdict,
     get_all_jobs,
+    get_jobs_count,
     get_unanalyzed_jobs,
     get_unanalyzed_count,
     get_stats,
@@ -53,7 +54,7 @@ from database import (
     update_user_settings,
 )
 from scrapers import ALL_SCRAPERS
-from models import SettingsUpdate, UserRegister, UserLogin, SettingsUpdateFull, TestConnectionRequest
+from models import SettingsUpdate, UserRegister, UserLogin, SettingsUpdateFull, TestConnectionRequest, MAX_DESC_LENGTH
 from services.state import AppState
 from auth import hash_password, verify_password, create_access_token, decode_token
 
@@ -202,7 +203,7 @@ async def _analyze_one_job(analyzer, job):
         title=job.title,
         category=job.category.value,
         budget=job.budget_raw or "not specified",
-        description=job.description[:600] if job.description else "no description",
+        description=job.description[:MAX_DESC_LENGTH] if job.description else "no description",
     )
     job.verdict = (
         job.verdict.__class__(result["verdict"])
@@ -246,7 +247,6 @@ async def analyze(
     provider: str = Query(default=""),
     force: bool = Query(default=False),
     state: AppState = Depends(get_state),
-    current_user: dict | None = Depends(get_current_user),
 ):
     """Запустить анализ заказов.
 
@@ -273,12 +273,15 @@ async def jobs(
     verdict: str = Query(default="all"),
     analyzed: str = Query(default="all"),
     sort: str = Query(default="desc"),
+    limit: int = Query(default=10, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
 ):
     cat_arg = category if category != "all" else None
     verdict_arg = verdict if verdict != "all" else None
     analyzed_arg = None if analyzed == "all" else (analyzed == "1")
-    rows = await get_all_jobs(category=cat_arg, verdict=verdict_arg, analyzed=analyzed_arg, sort=sort)
-    return JSONResponse(rows)
+    rows = await get_all_jobs(category=cat_arg, verdict=verdict_arg, analyzed=analyzed_arg, sort=sort, limit=limit, offset=offset)
+    total = await get_jobs_count(category=cat_arg, verdict=verdict_arg, analyzed=analyzed_arg)
+    return JSONResponse({"jobs": rows, "total": total})
 
 
 @app.get("/api/stats")
@@ -509,25 +512,20 @@ async def test_connection(
             {"success": False, "message": f"Неизвестный провайдер: {provider}"},
         )
 
-    api_key = data.api_key
-    model = data.model
-
-    # Если ключ/модель не переданы, берём из сохранённых настроек пользователя
-    if not api_key or not model:
-        settings = await get_user_settings(current_user["id"])
+    # Загружаем настройки, если каких-то полей не хватает
+    settings = await get_user_settings(current_user["id"])
 
     if provider == "ollama":
-        host = data.api_key or settings.get("ollama_host", "http://localhost:11434")
-        model = model or settings.get("ollama_model", "qwen2.5:14b")
+        host = data.host or data.api_key or settings.get("ollama_host", "http://localhost:11434")
+        model = data.model or settings.get("ollama_model", "qwen2.5:14b")
         ok, msg = await check_ollama_available(model=model, host=host)
         return JSONResponse({"success": ok, "message": msg})
 
     elif provider == "deepseek":
-        key = api_key or settings.get("deepseek_api_key", "")
-        model = model or settings.get("deepseek_model", "deepseek-chat")
+        key = data.api_key or settings.get("deepseek_api_key", "")
+        model = data.model or settings.get("deepseek_model", "deepseek-chat")
         if not key:
             return JSONResponse({"success": False, "message": "API key не указан"})
-        # Тестовый запрос
         try:
             analyzer = DeepSeekAnalyzer(api_key=key, model=model)
             result = await analyzer.analyze("Test", "Web App", "100", "Hello, this is a test.")
@@ -540,8 +538,8 @@ async def test_connection(
             return JSONResponse({"success": False, "message": f"DeepSeek error: {e}"})
 
     elif provider == "gemini":
-        key = api_key or settings.get("gemini_api_key", "")
-        model = model or settings.get("gemini_model", "gemini-1.5-flash")
+        key = data.api_key or settings.get("gemini_api_key", "")
+        model = data.model or settings.get("gemini_model", "gemini-1.5-flash")
         if not key:
             return JSONResponse({"success": False, "message": "API key не указан"})
         try:

@@ -6,10 +6,14 @@ from datetime import datetime, timedelta, timezone
 import bcrypt
 from jose import JWTError, jwt
 
-JWT_SECRET = os.getenv("JWT_SECRET", "change-me-to-a-random-string")
+JWT_SECRET = os.getenv("JWT_SECRET")
+if not JWT_SECRET:
+    raise RuntimeError(
+        "JWT_SECRET не задан в .env. Сгенерируйте: python3 -c \"import secrets; print(secrets.token_urlsafe(32))\""
+    )
 JWT_ALGORITHM = "HS256"
-# Токен живёт 365 дней
-JWT_EXPIRE_DAYS = 365
+# Токен живёт 30 дней — баланс между удобством и безопасностью
+JWT_EXPIRE_DAYS = 30
 
 
 def hash_password(password: str) -> str:

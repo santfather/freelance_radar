@@ -6,6 +6,11 @@ let sortDir = 'desc';
 let viewMode = 'grid';
 let currentUser = null;
 
+// 📄 Состояние пагинации
+let page = 0;
+let pageSize = 10;
+let totalJobs = 0;
+
 // 🦄 Состояние бегущего единорога
 let unicornActive = false;
 let unicornSpeed = 1;
@@ -147,13 +152,8 @@ function burstGoldenStars() {
 
 // ── Навешиваем ховер-эффекты ──
 document.addEventListener('DOMContentLoaded', () => {
-  const unicorn = document.getElementById('kawaii-unicorn');
   const hearts = document.querySelector('.floating-hearts');
 
-  if (unicorn) {
-    unicorn.addEventListener('mouseenter', () => { burstGoldenStars(); });
-    unicorn.addEventListener('click', () => { burstGoldenStars(); });
-  }
   if (hearts) {
     hearts.classList.add('interactive');
     hearts.addEventListener('mouseenter', () => { burstGoldenStars(); });
@@ -315,12 +315,19 @@ async function loadJobs() {
   const verdict = document.getElementById('filter-verdict').value;
   const category = document.getElementById('filter-category').value;
   const analyzed = document.getElementById('filter-analyzed').value;
-  const params = new URLSearchParams({ verdict, category, analyzed, sort: sortDir });
-  const jobs = await fetch(`/api/jobs?${params}`).then(r => r.json());
+  const offset = page * pageSize;
+  const params = new URLSearchParams({
+    verdict, category, analyzed, sort: sortDir,
+    limit: pageSize, offset,
+  });
+  const data = await fetch(`/api/jobs?${params}`).then(r => r.json());
+  const jobs = data.jobs || data; // fallback если сервер вернул массив
+  totalJobs = data.total || jobs.length;
 
   const content = document.getElementById('jobs-content');
   if (!jobs.length) {
     content.innerHTML = '<div class="empty">🌸 Нет заказов по выбранным фильтрам 🌸</div>';
+    updatePaginationUI();
     return;
   }
 
@@ -346,6 +353,47 @@ async function loadJobs() {
     html += `</div></div>`;
   }
   content.innerHTML = html;
+  updatePaginationUI();
+}
+
+function changePageSize(size) {
+  pageSize = parseInt(size);
+  page = 0;
+  loadJobs();
+}
+
+function goToPage(newPage) {
+  page = newPage;
+  loadJobs();
+}
+
+function updatePaginationUI() {
+  const totalPages = Math.max(1, Math.ceil(totalJobs / pageSize));
+  if (page >= totalPages) page = totalPages - 1;
+
+  document.getElementById('page-total').textContent = totalJobs;
+  document.getElementById('page-size-select').value = pageSize;
+
+  const nav = document.getElementById('pagination-nav');
+  if (totalPages <= 1) {
+    nav.innerHTML = '';
+    return;
+  }
+
+  let html = `<button class="pagination-btn" onclick="goToPage(0)" ${page === 0 ? 'disabled' : ''}>«</button>`;
+  html += `<button class="pagination-btn" onclick="goToPage(${page - 1})" ${page === 0 ? 'disabled' : ''}>‹</button>`;
+
+  // Показываем до 5 страниц вокруг текущей
+  const start = Math.max(0, Math.min(page - 2, totalPages - 5));
+  const end = Math.min(totalPages, start + 5);
+  for (let i = start; i < end; i++) {
+    html += `<button class="pagination-btn${i === page ? ' active' : ''}" onclick="goToPage(${i})">${i + 1}</button>`;
+  }
+
+  html += `<button class="pagination-btn" onclick="goToPage(${page + 1})" ${page >= totalPages - 1 ? 'disabled' : ''}>›</button>`;
+  html += `<button class="pagination-btn" onclick="goToPage(${totalPages - 1})" ${page >= totalPages - 1 ? 'disabled' : ''}>»</button>`;
+
+  nav.innerHTML = html;
 }
 
 function renderCard(job, index) {
