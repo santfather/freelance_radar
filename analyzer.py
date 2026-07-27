@@ -7,7 +7,7 @@ from abc import ABC, abstractmethod
 
 import httpx
 
-from models import Job
+from models import Job, MAX_DESC_LENGTH
 
 # ── Промпты (общие для всех анализаторов) ────────────────────────────────────
 
@@ -45,8 +45,6 @@ Analyze this job offer."""
 # ── Базовый класс ────────────────────────────────────────────────────────────
 
 class BaseAnalyzer(ABC):
-    """Абстрактный анализатор заказов."""
-
     @abstractmethod
     async def analyze(self, title: str, category: str, budget: str, description: str) -> dict:
         """Вернуть словарь с ключами: verdict, reason, complexity, estimated_hours."""
@@ -56,7 +54,7 @@ class BaseAnalyzer(ABC):
         return USER_TEMPLATE.format(
             title=title, category=category,
             budget=budget or "not specified",
-            description=description[:600] if description else "no description",
+            description=description[:MAX_DESC_LENGTH] if description else "no description",
         )
 
     def _error_result(self, error_msg: str) -> dict:
@@ -246,10 +244,11 @@ class GeminiAnalyzer(BaseAnalyzer):
                         "maxOutputTokens": 512,
                     },
                 }
+                headers = {"X-Goog-Api-Key": self.api_key}
                 resp = await client.post(
-                    f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent"
-                    f"?key={self.api_key}",
+                    f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent",
                     json=payload,
+                    headers=headers,
                     timeout=90,
                 )
                 resp.raise_for_status()

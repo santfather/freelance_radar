@@ -1,6 +1,6 @@
 from bs4 import BeautifulSoup
 
-from models import Job
+from models import Job, MAX_DESC_LENGTH
 from scrapers.base import BaseScraper, parse_budget
 
 CATEGORY_URLS = [
@@ -52,7 +52,7 @@ class OferiaScraper(BaseScraper):
                 self.seen.add(job_url)
 
                 desc_el = container.select_one(".description, p")
-                description = desc_el.get_text(" ", strip=True)[:800] if desc_el and container != link else ""
+                description = desc_el.get_text(" ", strip=True)[:MAX_DESC_LENGTH] if desc_el and container != link else ""
                 budget_el = container.select_one(".budget, .price")
                 budget_raw = budget_el.get_text(strip=True) if budget_el else ""
                 date_el = container.select_one("time, .date")

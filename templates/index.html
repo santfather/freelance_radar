@@ -20,6 +20,17 @@
 <div class="cloud cloud-3"></div>
 <div id="kawaii-unicorn" class="kawaii-unicorn">🦄</div>
 
+<!-- 🦄🏃‍♂️ Бегущий единорог (появляется при парсинге/анализе) -->
+<div id="running-unicorn">
+  <div class="unicorn-body">
+    🦄
+    <span class="unicorn-tooltip">Я бегу, чтобы найти тебе заказы! 🏃‍♂️✨</span>
+  </div>
+</div>
+
+<!-- 🌟 Звездопад (падающие звёзды, активны при анализе) -->
+<div id="stars-container"></div>
+
 <!-- 🎊 Конфетти контейнер -->
 <div id="confetti-container" class="confetti-container"></div>
 
@@ -107,6 +118,7 @@
   </select>
 
   <button class="btn btn-outline" onclick="toggleLog()">📋 Лог</button>
+  <button class="btn-unicorn-speed hidden" id="btn-unicorn-speed" onclick="speedUpUnicorn()" title="Ускорить единорога!">🚀 Ускорить 🦄</button>
 
   <span class="toolbar-spacer"></span>
 
@@ -115,7 +127,19 @@
   <button class="btn-icon" id="btn-list" onclick="setView('list')" title="Список">≡</button>
 </div>
 
-<div id="log-box" class="log-box"><span class="log-placeholder">💬 Здесь будут появляться сообщения...</span></div>
+<div id="log-container" class="log-container">
+  <div class="log-header">
+    <span class="log-header-title">📋 ЛОГ-ЛЕНТА 🌈</span>
+    <span class="log-entry-count" id="log-count">0</span>
+    <div class="log-header-actions">
+      <button class="log-btn" onclick="exportLog()" title="Экспортировать лог">📥</button>
+      <button class="log-btn" onclick="clearLog()" title="Очистить лог">🗑️</button>
+    </div>
+  </div>
+  <div class="log-entries" id="log-entries">
+    <span class="log-placeholder" id="log-placeholder">💬 Здесь будут появляться сообщения...</span>
+  </div>
+</div>
 
 <div id="progress-wrap" class="progress-bar-wrap hidden">
   <div id="progress-fill" class="progress-bar-fill"></div>

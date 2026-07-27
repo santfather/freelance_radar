@@ -4,6 +4,9 @@ from enum import Enum
 from pydantic import BaseModel
 
 
+MAX_DESC_LENGTH = 600  # макс. длина описания при извлечении из HTML / передаче в LLM
+
+
 class Category(str, Enum):
     WEB_APP = "Web App"
     MOBILE_APP = "Mobile App"

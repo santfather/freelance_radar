@@ -1,6 +1,8 @@
 """SQLite cache for scraped jobs and settings."""
 
 import os
+from typing import Optional
+
 import aiosqlite
 from models import Job, Category, Verdict
 
@@ -13,7 +15,6 @@ def _safe_category(name: str) -> Category:
         return Category(name)
     except ValueError:
         return Category.OTHER_IT
-
 
 
 async def init_db():
@@ -77,8 +78,6 @@ async def init_db():
         await db.commit()
 
 
-# ── Jobs ─────────────────────────────────────────────────────────────────────
-
 async def upsert_jobs(jobs: list[Job]):
     async with aiosqlite.connect(DB_PATH) as db:
         for job in jobs:
@@ -116,24 +115,24 @@ async def update_verdict(job: Job):
 
 
 async def get_all_jobs(
-    category: str = None,
-    verdict: str = None,
-    analyzed: str = None,
+    category: Optional[str] = None,
+    verdict: Optional[str] = None,
+    analyzed: Optional[bool] = None,
     sort: str = "desc",
 ) -> list[dict]:
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         where = []
         params = []
-        if category and category != "all":
+        if category:
             where.append("category = ?")
             params.append(category)
-        if verdict and verdict != "all":
+        if verdict:
             where.append("verdict = ?")
             params.append(verdict.upper())
-        if analyzed is not None and analyzed != "all":
+        if analyzed is not None:
             where.append("analyzed = ?")
-            params.append(1 if analyzed == "1" else 0)
+            params.append(1 if analyzed else 0)
         order = "DESC" if sort != "asc" else "ASC"
         sql = "SELECT * FROM jobs"
         if where:
@@ -198,8 +197,6 @@ async def reset_all_analysis():
         """)
         await db.commit()
 
-
-# ── Settings (key-value) ────────────────────────────────────────────────────
 
 async def get_setting(key: str, default: str = "") -> str:
     async with aiosqlite.connect(DB_PATH) as db:

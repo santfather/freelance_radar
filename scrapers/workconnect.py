@@ -1,6 +1,6 @@
 from bs4 import BeautifulSoup
 
-from models import Job
+from models import Job, MAX_DESC_LENGTH
 from scrapers.base import BaseScraper, parse_budget
 
 URLS = [
@@ -41,7 +41,7 @@ class WorkConnectScraper(BaseScraper):
                 if card:
                     desc_el = card.select_one("p.t-14-default, p[class*='t-14']")
                     if desc_el:
-                        description = desc_el.get_text(" ", strip=True)[:600]
+                        description = desc_el.get_text(" ", strip=True)[:MAX_DESC_LENGTH]
 
                     budget_el = card.select_one("div.t-14-medium")
                     if budget_el:
@@ -53,6 +53,9 @@ class WorkConnectScraper(BaseScraper):
                     if posted_at_el:
                         posted_at = posted_at_el.get("datetime") or posted_at_el.get_text(strip=True)
 
+                    # Закрытые заказы помечаются польскими фразами "zakończone" или
+                    # "zamknięte" в div.t-12-medium. Используем частичное совпадение,
+                    # так как точный текст может меняться (падежи, окончания).
                     status_els = card.select("div.t-12-medium")
                     is_closed = any(
                         "zakończon" in el.get_text().lower() or "zamknięt" in el.get_text().lower()

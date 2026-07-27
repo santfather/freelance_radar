@@ -1,6 +1,6 @@
 from bs4 import BeautifulSoup
 
-from models import Job
+from models import Job, MAX_DESC_LENGTH
 from scrapers.base import BaseScraper, parse_budget
 
 URLS = [
@@ -40,7 +40,7 @@ class UsemeScraper(BaseScraper):
                 if desc_el:
                     for a in desc_el.find_all("a"):
                         a.decompose()
-                    description = desc_el.get_text(" ", strip=True)[:600]
+                    description = desc_el.get_text(" ", strip=True)[:MAX_DESC_LENGTH]
 
                 budget_el = card.select_one("span.job__budget-value")
                 budget_raw = budget_el.get_text(strip=True) if budget_el else ""

@@ -9,7 +9,7 @@ import re
 
 from bs4 import BeautifulSoup
 
-from models import Job
+from models import Job, MAX_DESC_LENGTH
 from scrapers.base import BaseScraper, parse_budget
 
 URL = "https://www.toptal.com/freelance-jobs"
@@ -31,7 +31,9 @@ class ToptalScraper(BaseScraper):
 
         soup = BeautifulSoup(resp.text, "lxml")
 
-        # ── Method 1: JSON-LD structured data ──────────────────────────────
+        # JSON-LD может содержать как одиночный JobPosting, так и ItemList
+        # со списком вакансий. Проверяем оба случая — @type может быть
+        # "JobPosting" (прямая) или "ItemList" (список с entries).
         for script in soup.find_all("script", type="application/ld+json"):
             try:
                 data = json.loads(script.string)
@@ -64,8 +66,10 @@ class ToptalScraper(BaseScraper):
                     "div", class_=lambda c: c and "desc" in (c or "").lower()
                 )
                 if desc_el:
-                    description = desc_el.get_text(" ", strip=True)[:600]
+                    description = desc_el.get_text(" ", strip=True)[:MAX_DESC_LENGTH]
 
+            # На этой площадке бюджет отсутствует в отдельном поле,
+            # поэтому ищем его числами в тексте описания и заголовка.
             bmin, bmax = parse_budget(description + " " + title)
             jobs.append(self._make_job(
                 title=title, url=job_url, description=description,
@@ -111,8 +115,10 @@ class ToptalScraper(BaseScraper):
             return
         self.seen.add(url)
 
+        # На этой площадке бюджет отсутствует в отдельном поле,
+        # поэтому ищем его числами в тексте описания и заголовка.
         bmin, bmax = parse_budget(desc + " " + title)
         jobs.append(self._make_job(
-            title=title.strip(), url=url, description=desc[:800],
+            title=title.strip(), url=url, description=desc[:MAX_DESC_LENGTH],
             budget_raw="", budget_min=bmin, budget_max=bmax,
         ))

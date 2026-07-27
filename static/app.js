@@ -6,6 +6,51 @@ let sortDir = 'desc';
 let viewMode = 'grid';
 let currentUser = null;
 
+// 🦄 Состояние бегущего единорога
+let unicornActive = false;
+let unicornSpeed = 1;
+
+// 📋 Состояние лога
+let logIndex = 0;           // сколько сообщений уже обработано
+let logEntries = [];        // массив всех сообщений (для экспорта)
+const MAX_LOG = 100;        // лимит записей
+let starsInterval = null;   // интервал звездопада
+let scrapingActive = false;
+let analyzingActive = false;
+
+// 🎌 Японские словечки для трэш-эффекта
+const JP_WORDS = [
+  'かわいい', 'すごい', 'はい!', 'お願い!', 'ありがとう',
+  'すみません', 'やった!', '頑張って!', '最高!', '最高だ!',
+  'エラー!', '警告!', '完了!', '進行中', '待って!',
+  'ファイト!', 'ドキドキ', 'わくわく', 'にこにこ', 'ぴょんぴょん',
+  '🌈', '💖', '🌟', '🎀', '✨', '⭐', '🌸', '🦄'
+];
+
+// 🎨 Определение типа сообщения по тексту
+function detectLogType(text) {
+  const t = text.toLowerCase();
+  if (/^(error|ошибк|fail|failed|fatal|exception|❌)/i.test(t) || /(error|ошибк|fail|exception)/i.test(t)) return 'error';
+  if (/^(warn|warning|предупрежд|⚠️)/i.test(t) || /(warning|вниман|предупрежд)/i.test(t)) return 'warning';
+  if (/^(progress|progress|⏳|🔄)/i.test(t) || /(прогресс|progress)/i.test(t)) return 'progress';
+  if (/^(info|✅|done|complete|завершен|готово|успеш)/i.test(t) || /(завершен|успешно|готово|complete|done)/i.test(t)) return 'info';
+  if (scrapingActive && !analyzingActive) return 'progress';
+  return 'info';
+}
+
+// Иконки для типов
+const TYPE_ICONS = {
+  info: '✅',
+  warning: '⚠️',
+  error: '❌',
+  progress: '⏳'
+};
+
+// Случайный элемент из массива
+function randomItem(arr) {
+  return arr[Math.floor(Math.random() * arr.length)];
+}
+
 // ── Вкладки ──
 function switchTab(tab) {
   document.getElementById('tab-jobs').classList.toggle('active', tab === 'jobs');
@@ -119,27 +164,51 @@ document.addEventListener('DOMContentLoaded', () => {
 async function pollUntilDone(options) {
   const { getButton, onComplete } = options;
   if (pollInterval) clearInterval(pollInterval);
+  logIndex = 0; // сбрасываем счётчик при старте
   pollInterval = setInterval(async () => {
     const s = await fetch('/api/stats').then(r => r.json()).catch(() => ({}));
     updateProgressUI(s);
     updateScrapeStatus(s.scraping);
     updateAnalyzeStatus(s.analyzing, s.analyze_progress, s.analyze_total);
-    if (s.log) {
-      const logBox = document.getElementById('log-box');
-      logBox.innerHTML = s.log.map(l => `<div>${escHtml(l)}</div>`).join('');
+
+    // 🦄 Управление единорогом
+    scrapingActive = !!s.scraping;
+    analyzingActive = !!s.analyzing;
+    if (s.scraping || s.analyzing) {
+      showUnicorn();
+    } else {
+      hideUnicorn();
     }
+
+    // 🌟 Звездопад во время анализа
+    if (s.analyzing) {
+      startFallingStars();
+    } else {
+      stopFallingStars();
+    }
+
+    // 📋 Обновление лога — добавляем только новые записи
+    if (s.log && s.log.length > logIndex) {
+      for (let i = logIndex; i < s.log.length; i++) {
+        addLogEntry(s.log[i]);
+      }
+      logIndex = s.log.length;
+    }
+
     ['total','analyzed','unanalyzed','take'].forEach(k => {
       const el = document.getElementById(`stat-${k}`);
       if (el) {
         el.textContent = s[k] ?? '—';
-        // tiny pop animation on update
         el.style.transform = 'scale(1.15)';
         setTimeout(() => el.style.transform = '', 300);
       }
     });
+
     if (!s.scraping && !s.analyzing) {
       clearInterval(pollInterval);
       pollInterval = null;
+      scrapingActive = false;
+      analyzingActive = false;
       if (getButton) getButton().disabled = false;
       burstConfetti();
       if (onComplete) await onComplete();
@@ -172,8 +241,13 @@ async function loadStats() {
 
   document.getElementById('provider-select').value = prov;
 
+  // 📋 Инициализация лога через новую систему
   if (r.log && r.log.length) {
-    document.getElementById('log-box').innerHTML = r.log.map(l => `<div>${escHtml(l)}</div>`).join('');
+    logIndex = r.log.length;
+    const entriesEl = document.getElementById('log-entries');
+    entriesEl.innerHTML = '';
+    logEntries = [];
+    r.log.forEach(l => addLogEntry(l));
   }
 
   updateScrapeStatus(r.scraping);
@@ -324,7 +398,7 @@ async function startScrape() {
   const btn = document.getElementById('btn-scrape');
   btn.disabled = true;
   btn.textContent = '⏳ Парсинг...';
-  document.getElementById('log-box').classList.add('visible');
+  document.getElementById('log-container').classList.add('visible');
   logVisible = true;
   await fetch('/api/refresh', {method: 'POST'});
   pollUntilDone({
@@ -340,7 +414,7 @@ async function startAnalysis() {
   const btn = document.getElementById('btn-analyze');
   btn.disabled = true;
   btn.textContent = '⏳ Анализ...';
-  document.getElementById('log-box').classList.add('visible');
+  document.getElementById('log-container').classList.add('visible');
   logVisible = true;
   const r = await fetch('/api/analyze', {method: 'POST'}).then(r => r.json());
   if (r.status === 'already_running') {
@@ -364,7 +438,7 @@ async function startReanalysis() {
   btn.disabled = true;
   btnAnalyze.disabled = true;
   btn.textContent = '⏳ Переанализ...';
-  document.getElementById('log-box').classList.add('visible');
+  document.getElementById('log-container').classList.add('visible');
   logVisible = true;
   await fetch('/api/analyze?force=true', {method: 'POST'});
   pollUntilDone({
@@ -388,7 +462,7 @@ async function changeProvider(provider) {
 
 function toggleLog() {
   logVisible = !logVisible;
-  document.getElementById('log-box').classList.toggle('visible', logVisible);
+  document.getElementById('log-container').classList.toggle('visible', logVisible);
 }
 
 function toggleSort() {
@@ -603,6 +677,161 @@ async function testConnection(provider) {
 async function initSettingsTab() {
   await updateAuthUI();
 }
+
+/* ═══════════════════════════════════════════════════════════════
+   🦄 Функции бегущего единорога
+   ═══════════════════════════════════════════════════════════════ */
+
+function showUnicorn() {
+  if (unicornActive) return;
+  unicornActive = true;
+  const el = document.getElementById('running-unicorn');
+  el.classList.add('visible');
+  // Показываем кнопку ускорения
+  document.getElementById('btn-unicorn-speed').classList.remove('hidden');
+}
+
+function hideUnicorn() {
+  if (!unicornActive) return;
+  unicornActive = false;
+  const el = document.getElementById('running-unicorn');
+  el.classList.remove('visible');
+  el.classList.remove('speedy');
+  document.getElementById('btn-unicorn-speed').classList.add('hidden');
+  unicornSpeed = 1;
+}
+
+function speedUpUnicorn() {
+  const el = document.getElementById('running-unicorn');
+  if (!el.classList.contains('visible')) return;
+  unicornSpeed = Math.min(unicornSpeed + 0.5, 3);
+  if (unicornSpeed >= 2) {
+    el.classList.add('speedy');
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   📋 Функции нового лога
+   ═══════════════════════════════════════════════════════════════ */
+
+function addLogEntry(text) {
+  const entriesEl = document.getElementById('log-entries');
+  const placeholder = document.getElementById('log-placeholder');
+  const countEl = document.getElementById('log-count');
+
+  // Убираем плейсхолдер
+  if (placeholder) placeholder.remove();
+
+  // Определяем тип и иконку
+  const type = detectLogType(text);
+  const icon = TYPE_ICONS[type] || '•';
+  const jpWord = Math.random() < 0.4 ? randomItem(JP_WORDS) : null;
+
+  // Создаём DOM-элемент
+  const entry = document.createElement('div');
+  entry.className = `log-entry log-${type}`;
+
+  // Иконка + текст + японское словечко
+  let html = `<span class="log-entry-icon">${icon}</span>${escHtml(text)}`;
+  if (jpWord) {
+    html += ` <span class="log-entry-jp">${jpWord}</span>`;
+  }
+  entry.innerHTML = html;
+
+  // Иногда добавляем эффект печати (для не-ошибок, с вероятностью 20%)
+  if (type !== 'error' && Math.random() < 0.2) {
+    entry.classList.add('typing');
+  }
+
+  entriesEl.appendChild(entry);
+
+  // Сохраняем в массив для экспорта
+  logEntries.push({ text, type, icon });
+
+  // Ограничение длины
+  if (logEntries.length > MAX_LOG) {
+    const excess = logEntries.length - MAX_LOG;
+    const children = entriesEl.children;
+    for (let i = 0; i < excess && children.length > 0; i++) {
+      children[0].remove();
+    }
+    logEntries.splice(0, excess);
+  }
+
+  // Авто-скролл вниз
+  const container = document.getElementById('log-container');
+  container.scrollTop = container.scrollHeight;
+
+  // Обновляем счётчик
+  countEl.textContent = logEntries.length;
+}
+
+function clearLog() {
+  const entriesEl = document.getElementById('log-entries');
+  entriesEl.innerHTML = '<span class="log-placeholder" id="log-placeholder">💬 Лог очищен. Жду новых сообщений...</span>';
+  logEntries = [];
+  logIndex = 0;
+  document.getElementById('log-count').textContent = '0';
+}
+
+function exportLog() {
+  const lines = logEntries.map(e => `[${e.type.toUpperCase()}] ${e.text}`).join('\n');
+  const blob = new Blob([`🎯 Freelance Radar Log Export 🎯\n${'═'.repeat(50)}\n${lines}\n${'═'.repeat(50)}\nЭкспортировано: ${new Date().toLocaleString()}\n`], { type: 'text/plain;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `freelance-radar-log-${Date.now()}.txt`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   🌟 Звездопад — падающие звёздочки
+   ═══════════════════════════════════════════════════════════════ */
+
+function startFallingStars() {
+  if (starsInterval) return;
+  const container = document.getElementById('stars-container');
+  const starEmojis = ['✨', '🌟', '⭐', '💫', '✦', '✧'];
+
+  function dropStar() {
+    const star = document.createElement('div');
+    star.className = 'falling-star';
+    star.textContent = randomItem(starEmojis);
+    star.style.left = Math.random() * 100 + '%';
+    star.style.fontSize = (12 + Math.random() * 18) + 'px';
+    star.style.animationDuration = (3 + Math.random() * 4) + 's';
+    star.style.animationDelay = '0s';
+    container.appendChild(star);
+    // Удаляем после анимации
+    setTimeout(() => { if (star.parentNode) star.remove(); }, 8000);
+  }
+
+  // Сразу кидаем несколько
+  for (let i = 0; i < 8; i++) {
+    setTimeout(dropStar, i * 200);
+  }
+  starsInterval = setInterval(dropStar, 600);
+}
+
+function stopFallingStars() {
+  if (starsInterval) {
+    clearInterval(starsInterval);
+    starsInterval = null;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   🎀 Ховер-эффекты на бегущем единороге
+   ═══════════════════════════════════════════════════════════════ */
+
+// Добавляем конфетти при клике на бегущего единорога
+document.addEventListener('DOMContentLoaded', () => {
+  const runningUnicorn = document.getElementById('running-unicorn');
+  if (runningUnicorn) {
+    runningUnicorn.addEventListener('click', () => { burstGoldenStars(); });
+  }
+});
 
 // ── Init ──
 (async () => {

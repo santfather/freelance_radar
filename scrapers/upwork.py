@@ -10,7 +10,7 @@ from urllib.parse import urljoin
 
 from bs4 import BeautifulSoup
 
-from models import Job
+from models import Job, MAX_DESC_LENGTH
 from scrapers.base import BaseScraper, parse_budget
 
 # Основная страница — веб-разработка
@@ -77,7 +77,7 @@ class UpworkScraper(BaseScraper):
         return results
 
     def _scrape_by_links(self, soup) -> list[Job]:
-        """Fallback: поиск любых ссылок /jobs/ или /freelance-jobs/."""
+        """Fallback: если селекторы не сработали — ищем любые ссылки /jobs/ или /freelance-jobs/."""
         results: list[Job] = []
         for link in soup.find_all("a", href=True):
             href = link.get("href", "")
@@ -97,9 +97,11 @@ class UpworkScraper(BaseScraper):
                 for tag in card.find_all(["p", "div", "span"]):
                     txt = tag.get_text(strip=True)
                     if len(txt) > 40:
-                        description = txt[:600]
+                        description = txt[:MAX_DESC_LENGTH]
                         break
 
+            # На этой площадке бюджет отсутствует в отдельном поле,
+            # поэтому ищем его числами в тексте описания и заголовка.
             bmin, bmax = parse_budget(description + " " + title)
             results.append(self._make_job(
                 title=title, url=job_url, description=description,
@@ -128,7 +130,7 @@ class UpworkScraper(BaseScraper):
         self.seen.add(job_url)
 
         desc_el = card.select_one('[data-test*="description"], p[class*="description"]')
-        description = desc_el.get_text(" ", strip=True)[:600] if desc_el else ""
+        description = desc_el.get_text(" ", strip=True)[:MAX_DESC_LENGTH] if desc_el else ""
 
         budget_el = card.select_one('[data-test*="budget"], [class*="budget"], [class*="price"]')
         budget_raw = budget_el.get_text(strip=True) if budget_el else ""
@@ -136,6 +138,8 @@ class UpworkScraper(BaseScraper):
         date_el = card.find("time") or card.select_one('[data-test*="date"]')
         posted_at = date_el.get_text(strip=True) if date_el else ""
 
+        # На этой площадке бюджет отсутствует в отдельном поле,
+        # поэтому ищем его числами в тексте описания и заголовка.
         bmin, bmax = parse_budget(budget_raw + " " + description)
 
         return self._make_job(
@@ -175,11 +179,13 @@ class UpworkScraper(BaseScraper):
             self.seen.add(href)
 
             desc_el = item.find("description")
-            description = desc_el.get_text(" ", strip=True)[:800] if desc_el else ""
+            description = desc_el.get_text(" ", strip=True)[:MAX_DESC_LENGTH] if desc_el else ""
 
             date_el = item.find("pubDate")
             posted_at = date_el.get_text(strip=True) if date_el else ""
 
+            # На этой площадке бюджет отсутствует в отдельном поле,
+            # поэтому ищем его числами в тексте описания и заголовка.
             bmin, bmax = parse_budget(description + " " + title)
 
             results.append(self._make_job(

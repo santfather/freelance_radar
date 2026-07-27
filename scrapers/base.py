@@ -1,5 +1,6 @@
 import asyncio
 import hashlib
+import logging
 import random
 import re
 from abc import ABC, abstractmethod
@@ -7,7 +8,9 @@ from typing import Optional
 
 import httpx
 
-from models import Category, Job
+from models import Category, Job, MAX_DESC_LENGTH
+
+logger = logging.getLogger("freelance-radar.scraper")
 
 USER_AGENTS = [
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
@@ -111,7 +114,7 @@ class BaseScraper(ABC):
                 resp.raise_for_status()
                 return resp
         except Exception as e:
-            print(f"[{self.source_name}] fetch error {url}: {e}")
+            logger.warning(f"[{self.source_name}] fetch error {url}: {e}")
             return None
 
     async def _get_with_session(self, warmup_url: str, target_url: str) -> Optional[httpx.Response]:
@@ -136,7 +139,7 @@ class BaseScraper(ABC):
                 resp.raise_for_status()
                 return resp
         except Exception as e:
-            print(f"[{self.source_name}] session fetch error: {e}")
+            logger.warning(f"[{self.source_name}] session fetch error: {e}")
             return None
 
     @abstractmethod

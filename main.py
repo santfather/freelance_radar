@@ -6,6 +6,7 @@ Then open: http://localhost:8099
 
 import asyncio
 import os
+import time
 import logging
 from contextlib import asynccontextmanager
 
@@ -98,15 +99,15 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Freelance Radar", lifespan=lifespan)
 
-BATCH_SIZE = 10
+BATCH_SIZE = 10  # параллельных LLM-запросов; превышение может вызвать rate limiting
 
 
 # ── Background tasks ──────────────────────────────────────────────────────────
 
 async def _run_scrape(state: AppState):
-    """Только парсинг (без анализа)."""
     if state.scraping:
         return
+    state.stats_cache = None
     state.scraping = True
     state.scrape_log = ["▶ Парсинг запущен..."]
     try:
@@ -145,6 +146,9 @@ def _finalize_analysis(state: AppState):
     state.analyze_log.append(f"✅ Проанализировано {state.analyze_total} заказов")
 
 
+# Обрабатываем пачками по BATCH_SIZE — asyncio.gather отправляет запросы
+# параллельно, что ускоряет анализ. return_exceptions=True не даёт одному
+# сбою обрушить всю пачку.
 async def _process_batch(analyzer, batch, state: AppState):
     tasks = [_analyze_one_job(analyzer, job) for job in batch]
     results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -176,6 +180,7 @@ async def _run_analysis(provider: str, state: AppState):
     """Анализ всех непроанализированных заказов через указанного провайдера."""
     if state.analyzing:
         return
+    state.stats_cache = None
     state.analyzing = True
     _init_analysis(state, provider)
     try:
@@ -229,7 +234,6 @@ async def refresh(
     background_tasks: BackgroundTasks,
     state: AppState = Depends(get_state),
 ):
-    """Только парсинг (без анализа)."""
     if state.scraping:
         return JSONResponse({"status": "already_running"})
     background_tasks.add_task(_run_scrape, state)
@@ -270,13 +274,22 @@ async def jobs(
     analyzed: str = Query(default="all"),
     sort: str = Query(default="desc"),
 ):
-    rows = await get_all_jobs(category=category, verdict=verdict, analyzed=analyzed, sort=sort)
+    cat_arg = category if category != "all" else None
+    verdict_arg = verdict if verdict != "all" else None
+    analyzed_arg = None if analyzed == "all" else (analyzed == "1")
+    rows = await get_all_jobs(category=cat_arg, verdict=verdict_arg, analyzed=analyzed_arg, sort=sort)
     return JSONResponse(rows)
 
 
 @app.get("/api/stats")
 async def stats(state: AppState = Depends(get_state)):
-    data = await get_stats()
+    now = time.time()
+    if state.stats_cache and (now - state.stats_cache_time) < state.STATS_CACHE_TTL:
+        data = state.stats_cache.copy()
+    else:
+        data = await get_stats()
+        state.stats_cache = data
+        state.stats_cache_time = now
     unanalyzed = await get_unanalyzed_count()
     data["unanalyzed"] = unanalyzed
     data["scraping"] = state.scraping
