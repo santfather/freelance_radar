@@ -7,7 +7,7 @@ from abc import ABC, abstractmethod
 
 import httpx
 
-from models import Job, Verdict
+from models import Job, MAX_DESC_LENGTH
 
 # ── Промпты (общие для всех анализаторов) ────────────────────────────────────
 
@@ -45,12 +45,37 @@ Analyze this job offer."""
 # ── Базовый класс ────────────────────────────────────────────────────────────
 
 class BaseAnalyzer(ABC):
-    """Абстрактный анализатор заказов."""
-
     @abstractmethod
     async def analyze(self, title: str, category: str, budget: str, description: str) -> dict:
         """Вернуть словарь с ключами: verdict, reason, complexity, estimated_hours."""
         ...
+
+    def _build_prompt(self, title: str, category: str, budget: str, description: str) -> str:
+        return USER_TEMPLATE.format(
+            title=title, category=category,
+            budget=budget or "not specified",
+            description=description[:MAX_DESC_LENGTH] if description else "no description",
+        )
+
+    def _error_result(self, error_msg: str) -> dict:
+        return {
+            "verdict": "UNKNOWN",
+            "reason": error_msg,
+            "complexity": 0,
+            "estimated_hours": 0,
+        }
+
+    async def _call_llm(self, url: str, payload: dict, headers: dict | None = None, timeout: int = 90) -> str:
+        """Универсальный HTTP-вызов к LLM API.
+        
+        Возвращает сырой текст ответа. headers могут быть None (для Ollama без ключа).
+        """
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(
+                url, json=payload, headers=headers or {}, timeout=timeout,
+            )
+            resp.raise_for_status()
+            return resp.text
 
 
 # ── Вспомогательная функция парсинга ответа ──────────────────────────────────
@@ -85,16 +110,12 @@ def _extract_result(raw: str) -> dict:
 class OllamaAnalyzer(BaseAnalyzer):
     """Анализ через локальную Ollama (поддерживает /api/chat и /api/generate)."""
 
-    def __init__(self):
-        self.host = os.getenv("OLLAMA_HOST", "http://localhost:11434")
-        self.model = os.getenv("OLLAMA_MODEL", "mistral")
+    def __init__(self, model: str | None = None, host: str | None = None):
+        self.host = host or os.getenv("OLLAMA_HOST", "http://localhost:11434")
+        self.model = model or os.getenv("OLLAMA_MODEL", "qwen2.5:14b")
 
     async def analyze(self, title: str, category: str, budget: str, description: str) -> dict:
-        prompt = USER_TEMPLATE.format(
-            title=title, category=category,
-            budget=budget or "not specified",
-            description=description[:600] if description else "no description",
-        )
+        prompt = self._build_prompt(title, category, budget, description)
         try:
             async with httpx.AsyncClient() as client:
                 try:
@@ -107,12 +128,7 @@ class OllamaAnalyzer(BaseAnalyzer):
                         raise
             return _extract_result(raw)
         except Exception as e:
-            return {
-                "verdict": "UNKNOWN",
-                "reason": f"Ollama error: {e}",
-                "complexity": 0,
-                "estimated_hours": 0,
-            }
+            return self._error_result(f"Ollama error: {e}")
 
     async def _call_chat(self, client: httpx.AsyncClient, prompt: str) -> str:
         payload = {
@@ -142,12 +158,12 @@ class OllamaAnalyzer(BaseAnalyzer):
         return resp.json().get("response", "{}")
 
 
-async def check_ollama_available() -> tuple[bool, str]:
+async def check_ollama_available(model: str | None = None, host: str | None = None) -> tuple[bool, str]:
     """Проверить, доступна ли Ollama и нужная модель."""
-    host = os.getenv("OLLAMA_HOST", "http://localhost:11434")
-    model = os.getenv("OLLAMA_MODEL", "mistral")
+    host = host or os.getenv("OLLAMA_HOST", "http://localhost:11434")
+    model = model or os.getenv("OLLAMA_MODEL", "qwen2.5:14b")
     try:
-        async with httpx.AsyncClient(timeout=5) as client:
+        async with httpx.AsyncClient(timeout=15) as client:
             resp = await client.get(f"{host}/api/tags")
             resp.raise_for_status()
             models = [m["name"] for m in resp.json().get("models", [])]
@@ -165,24 +181,15 @@ async def check_ollama_available() -> tuple[bool, str]:
 class DeepSeekAnalyzer(BaseAnalyzer):
     """Анализ через DeepSeek API (OpenAI-совместимый)."""
 
-    def __init__(self):
-        self.api_key = os.getenv("DEEPSEEK_API_KEY", "")
-        self.model = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
+    def __init__(self, api_key: str | None = None, model: str | None = None):
+        self.api_key = api_key or os.getenv("DEEPSEEK_API_KEY", "")
+        self.model = model or os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
         self.base_url = "https://api.deepseek.com/v1"
 
     async def analyze(self, title: str, category: str, budget: str, description: str) -> dict:
-        prompt = USER_TEMPLATE.format(
-            title=title, category=category,
-            budget=budget or "not specified",
-            description=description[:600] if description else "no description",
-        )
+        prompt = self._build_prompt(title, category, budget, description)
         if not self.api_key:
-            return {
-                "verdict": "UNKNOWN",
-                "reason": "DeepSeek API key not configured",
-                "complexity": 0,
-                "estimated_hours": 0,
-            }
+            return self._error_result("DeepSeek API key not configured")
         try:
             async with httpx.AsyncClient() as client:
                 payload = {
@@ -204,17 +211,12 @@ class DeepSeekAnalyzer(BaseAnalyzer):
                 raw = resp.json()["choices"][0]["message"]["content"]
             return _extract_result(raw)
         except Exception as e:
-            return {
-                "verdict": "UNKNOWN",
-                "reason": f"DeepSeek error: {e}",
-                "complexity": 0,
-                "estimated_hours": 0,
-            }
+            return self._error_result(f"DeepSeek error: {e}")
 
 
-async def check_deepseek_available() -> tuple[bool, str]:
+async def check_deepseek_available(api_key: str | None = None) -> tuple[bool, str]:
     """Проверить, настроен ли DeepSeek API."""
-    key = os.getenv("DEEPSEEK_API_KEY", "")
+    key = api_key or os.getenv("DEEPSEEK_API_KEY", "")
     if not key:
         return False, "DeepSeek API key not set"
     try:
@@ -234,23 +236,14 @@ async def check_deepseek_available() -> tuple[bool, str]:
 class GeminiAnalyzer(BaseAnalyzer):
     """Анализ через Google Gemini API."""
 
-    def __init__(self):
-        self.api_key = os.getenv("GEMINI_API_KEY", "")
-        self.model = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+    def __init__(self, api_key: str | None = None, model: str | None = None):
+        self.api_key = api_key or os.getenv("GEMINI_API_KEY", "")
+        self.model = model or os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 
     async def analyze(self, title: str, category: str, budget: str, description: str) -> dict:
-        prompt = USER_TEMPLATE.format(
-            title=title, category=category,
-            budget=budget or "not specified",
-            description=description[:600] if description else "no description",
-        )
+        prompt = self._build_prompt(title, category, budget, description)
         if not self.api_key:
-            return {
-                "verdict": "UNKNOWN",
-                "reason": "Gemini API key not configured",
-                "complexity": 0,
-                "estimated_hours": 0,
-            }
+            return self._error_result("Gemini API key not configured")
         try:
             full_prompt = f"{SYSTEM_PROMPT}\n\n{prompt}"
             async with httpx.AsyncClient() as client:
@@ -263,10 +256,11 @@ class GeminiAnalyzer(BaseAnalyzer):
                         "maxOutputTokens": 512,
                     },
                 }
+                headers = {"X-Goog-Api-Key": self.api_key}
                 resp = await client.post(
-                    f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent"
-                    f"?key={self.api_key}",
+                    f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent",
                     json=payload,
+                    headers=headers,
                     timeout=90,
                 )
                 resp.raise_for_status()
@@ -274,23 +268,20 @@ class GeminiAnalyzer(BaseAnalyzer):
                 raw = data.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "{}")
             return _extract_result(raw)
         except Exception as e:
-            return {
-                "verdict": "UNKNOWN",
-                "reason": f"Gemini error: {e}",
-                "complexity": 0,
-                "estimated_hours": 0,
-            }
+            return self._error_result(f"Gemini error: {e}")
 
 
-async def check_gemini_available() -> tuple[bool, str]:
+async def check_gemini_available(api_key: str | None = None) -> tuple[bool, str]:
     """Проверить, настроен ли Gemini API."""
-    key = os.getenv("GEMINI_API_KEY", "")
+    key = api_key or os.getenv("GEMINI_API_KEY", "")
     if not key:
         return False, "Gemini API key not set"
     try:
         async with httpx.AsyncClient(timeout=10) as client:
+            headers = {"X-Goog-Api-Key": key}
             resp = await client.get(
-                f"https://generativelanguage.googleapis.com/v1beta/models?key={key}",
+                "https://generativelanguage.googleapis.com/v1beta/models",
+                headers=headers,
             )
             resp.raise_for_status()
             return True, "Gemini API OK"
@@ -313,19 +304,15 @@ PROVIDER_NAMES = {
 }
 
 
-def get_analyzer(provider: str) -> BaseAnalyzer:
-    """Фабрика — возвращает экземпляр анализатора по имени провайдера."""
+def get_analyzer(provider: str, **kwargs) -> BaseAnalyzer:
+    """Фабрика — возвращает экземпляр анализатора по имени провайдера.
+
+    Параметры:
+        provider: имя провайдера (ollama/deepseek/gemini)
+        **kwargs: передаются в конструктор анализатора (api_key, model, host)
+    """
     provider = provider.lower()
     cls = PROVIDER_MAP.get(provider)
     if cls is None:
         raise ValueError(f"Unknown provider '{provider}'. Choose from: {', '.join(PROVIDER_MAP)}")
-    return cls[0]()
-
-
-async def check_provider_available(provider: str) -> tuple[bool, str]:
-    """Проверить доступность провайдера."""
-    provider = provider.lower()
-    entry = PROVIDER_MAP.get(provider)
-    if entry is None:
-        return False, f"Unknown provider '{provider}'"
-    return await entry[1]()
+    return cls[0](**kwargs)

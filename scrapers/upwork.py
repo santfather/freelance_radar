@@ -6,12 +6,12 @@
 RSS — запасной вариант, если категорийная страница не отдала данные.
 """
 
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urljoin
 
 from bs4 import BeautifulSoup
 
-from models import Job
-from scrapers.base import BaseScraper, detect_category, make_id, parse_budget
+from models import Job, MAX_DESC_LENGTH
+from scrapers.base import BaseScraper, parse_budget
 
 # Основная страница — веб-разработка
 LISTING_URL = "https://www.upwork.com/freelance-jobs/website-development/"
@@ -33,38 +33,35 @@ class UpworkScraper(BaseScraper):
 
     async def scrape(self) -> list[Job]:
         jobs: list[Job] = []
-        seen: set[str] = set()
 
         # ── Stage 1: категорийная страница website-development ──────────
-        print(f"[upwork] scraping listing page: {LISTING_URL}")
-        found = await self._scrape_listing(LISTING_URL, seen)
+        found = await self._scrape_listing(LISTING_URL)
         jobs.extend(found)
 
-        # ── Stage 2: RSS fallback (если со страницы ничего не вытащили) ──
+        # ── Stage 2: RSS fallback ──
         if not jobs:
-            print("[upwork] listing page gave 0 jobs, trying RSS feeds...")
             for url in RSS_FEEDS:
-                found = await self._scrape_rss(url, seen)
+                found = await self._scrape_rss(url)
                 jobs.extend(found)
 
-        print(f"[upwork] scraped {len(jobs)} jobs total")
         return jobs
 
-    async def _scrape_listing(self, url: str, seen: set[str]) -> list[Job]:
+    async def _scrape_listing(self, url: str) -> list[Job]:
         """Парсит статический HTML страницы freelance-jobs."""
-        results: list[Job] = []
-
         resp = await self._get(url)
         if not resp:
-            print(f"[upwork] listing page fetch failed: {url}")
-            return results
+            return []
 
         soup = BeautifulSoup(resp.text, "lxml")
 
-        # ── Селекторы для карточек вакансий на странице ──
-        # Upwork сервер-сайд рендерит часть контента; перебираем известные паттерны
+        results = self._scrape_by_selectors(soup)
+        if not results:
+            results = self._scrape_by_links(soup)
+        return results
 
-        # Вариант 1: современная вёрстка (data-test атрибуты)
+    def _scrape_by_selectors(self, soup) -> list[Job]:
+        """Парсинг через data-test атрибуты."""
+        results: list[Job] = []
         job_cards = (
             soup.select('[data-test="job-tile"]')
             or soup.select('[data-test="JobTile"]')
@@ -74,54 +71,47 @@ class UpworkScraper(BaseScraper):
         )
 
         for card in job_cards:
-            job = self._extract_from_card(card, seen)
+            job = self._extract_from_card(card)
             if job:
                 results.append(job)
+        return results
 
-        # Вариант 2: ищем любые ссылки вида /jobs/SomeTitle
-        if not results:
-            print("[upwork] no job cards found with selectors, trying link-based extraction...")
-            for link in soup.find_all("a", href=True):
-                href = link.get("href", "")
-                # Upwork job links: /jobs/~identifier or /freelance-jobs/~name
-                if not href.startswith("/jobs/") and "freelance-jobs/" not in href:
-                    continue
-                title = link.get_text(strip=True)
-                if not title or len(title) < 8:
-                    continue
-                job_url = urljoin("https://www.upwork.com", href)
-                if job_url in seen:
-                    continue
-                seen.add(job_url)
+    def _scrape_by_links(self, soup) -> list[Job]:
+        """Fallback: если селекторы не сработали — ищем любые ссылки /jobs/ или /freelance-jobs/."""
+        results: list[Job] = []
+        for link in soup.find_all("a", href=True):
+            href = link.get("href", "")
+            if not href.startswith("/jobs/") and "freelance-jobs/" not in href:
+                continue
+            title = link.get_text(strip=True)
+            if not title or len(title) < 8:
+                continue
+            job_url = urljoin("https://www.upwork.com", href)
+            if job_url in self.seen:
+                continue
+            self.seen.add(job_url)
 
-                card = link.find_parent(["div", "article", "section"])
-                description = ""
-                if card:
-                    for tag in card.find_all(["p", "div", "span"]):
-                        txt = tag.get_text(strip=True)
-                        if len(txt) > 40:
-                            description = txt[:600]
-                            break
+            card = link.find_parent(["div", "article", "section"])
+            description = ""
+            if card:
+                for tag in card.find_all(["p", "div", "span"]):
+                    txt = tag.get_text(strip=True)
+                    if len(txt) > 40:
+                        description = txt[:MAX_DESC_LENGTH]
+                        break
 
-                bmin, bmax = parse_budget(description + " " + title)
-                results.append(Job(
-                    id=make_id(title, self.source_name),
-                    title=title,
-                    description=description,
-                    url=job_url,
-                    source=self.source_name,
-                    category=detect_category(title, description),
-                    budget_raw="",
-                    budget_min=bmin,
-                    budget_max=bmax,
-                ))
+            # На этой площадке бюджет отсутствует в отдельном поле,
+            # поэтому ищем его числами в тексте описания и заголовка.
+            bmin, bmax = parse_budget(description + " " + title)
+            results.append(self._make_job(
+                title=title, url=job_url, description=description,
+                budget_raw="", budget_min=bmin, budget_max=bmax,
+            ))
 
         return results
 
-    def _extract_from_card(self, card, seen: set[str]) -> Job | None:
+    def _extract_from_card(self, card) -> Job | None:
         """Извлекает Job из одной карточки вакансии."""
-
-        # Заголовок + ссылка
         title_el = (
             card.select_one("a[data-test*='title'], a[class*='title']")
             or card.select_one("a[href*='/jobs/']")
@@ -135,55 +125,44 @@ class UpworkScraper(BaseScraper):
             return None
 
         job_url = urljoin("https://www.upwork.com", href)
-        if job_url in seen:
+        if job_url in self.seen:
             return None
-        seen.add(job_url)
+        self.seen.add(job_url)
 
-        # Описание
         desc_el = card.select_one('[data-test*="description"], p[class*="description"]')
-        description = desc_el.get_text(" ", strip=True)[:600] if desc_el else ""
+        description = desc_el.get_text(" ", strip=True)[:MAX_DESC_LENGTH] if desc_el else ""
 
-        # Бюджет
         budget_el = card.select_one('[data-test*="budget"], [class*="budget"], [class*="price"]')
         budget_raw = budget_el.get_text(strip=True) if budget_el else ""
 
-        # Дата
         date_el = card.find("time") or card.select_one('[data-test*="date"]')
         posted_at = date_el.get_text(strip=True) if date_el else ""
 
+        # На этой площадке бюджет отсутствует в отдельном поле,
+        # поэтому ищем его числами в тексте описания и заголовка.
         bmin, bmax = parse_budget(budget_raw + " " + description)
 
-        return Job(
-            id=make_id(title, self.source_name),
-            title=title,
-            description=description,
-            url=job_url,
-            source=self.source_name,
-            category=detect_category(title, description),
-            budget_raw=budget_raw,
-            budget_min=bmin,
-            budget_max=bmax,
+        return self._make_job(
+            title=title, url=job_url, description=description,
+            budget_raw=budget_raw, budget_min=bmin, budget_max=bmax,
             posted_at=posted_at,
         )
 
-    async def _scrape_rss(self, url: str, seen: set[str]) -> list[Job]:
+    async def _scrape_rss(self, url: str) -> list[Job]:
         """Парсит RSS-ленту Upwork."""
         results: list[Job] = []
 
         resp = await self._get(url)
         if not resp:
-            print(f"[upwork] RSS fetch failed: {url[:60]}...")
             return results
 
         ct = resp.headers.get("content-type", "").lower()
         if "xml" not in ct:
-            print(f"[upwork] RSS returned non-XML content-type ({ct}): {url[:60]}...")
             return results
 
         soup = BeautifulSoup(resp.text, "xml")
         items = soup.find_all("item")
         if not items:
-            print(f"[upwork] no items in RSS feed: {url[:60]}...")
             return results
 
         for item in items:
@@ -195,28 +174,23 @@ class UpworkScraper(BaseScraper):
             link_el = item.find("link")
             href = link_el.get_text(strip=True) if link_el else ""
 
-            if not title or len(title) < 8 or href in seen:
+            if not title or len(title) < 8 or href in self.seen:
                 continue
-            seen.add(href)
+            self.seen.add(href)
 
             desc_el = item.find("description")
-            description = desc_el.get_text(" ", strip=True)[:800] if desc_el else ""
+            description = desc_el.get_text(" ", strip=True)[:MAX_DESC_LENGTH] if desc_el else ""
 
             date_el = item.find("pubDate")
             posted_at = date_el.get_text(strip=True) if date_el else ""
 
+            # На этой площадке бюджет отсутствует в отдельном поле,
+            # поэтому ищем его числами в тексте описания и заголовка.
             bmin, bmax = parse_budget(description + " " + title)
 
-            results.append(Job(
-                id=make_id(title, self.source_name),
-                title=title,
-                description=description,
-                url=href,
-                source=self.source_name,
-                category=detect_category(title, description),
-                budget_raw="",
-                budget_min=bmin,
-                budget_max=bmax,
+            results.append(self._make_job(
+                title=title, url=href, description=description,
+                budget_raw="", budget_min=bmin, budget_max=bmax,
                 posted_at=posted_at,
             ))
 

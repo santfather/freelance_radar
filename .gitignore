@@ -16,6 +16,15 @@ venv/
 *.db
 radar.db
 
+# Скачанные исторические медиа (ASSETS_ROOT) и экспорт данных
+assets/
+export/
+data/
+
+# Firebase service account keys
+*serviceAccount*.json
+*-firebase-adminsdk-*.json
+
 # OS files
 .DS_Store
 Thumbs.db

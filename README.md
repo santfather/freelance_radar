@@ -5,7 +5,9 @@
 
 ## Возможности
 
-- **Парсинг 6 площадок:** Oferia.pl, Useme.com, WorkConnect.app, Zleca.pl, Upwork.com, Toptal.com
+- **Парсинг 14 площадок:** Oferia.pl, Useme.com, WorkConnect.app, Zleca.pl, Upwork.com,
+  Toptal.com, Freelancehunt.com, Fixly.pl, Freelance.pl, Outwork.pl, Freelancer.com,
+  Fiverr.com, Gigster.com, Freelancermap.com
 - **LLM-анализ** каждым из трёх провайдеров на выбор:
   - **Ollama** — локально, бесплатно, без интернета
   - **DeepSeek API** — дешёвый и быстрый облачный API
@@ -17,8 +19,16 @@
   и др.), Other IT — на основе ключевых слов в заголовке и описании
 - **Вердикты:** TAKE / SKIP / UNKNOWN — каждый заказ получает оценку сложности (1–5)
   и примерное время в часах
-- **Веб-интерфейс:** SPA с тёмной темой, фильтрацией по категориям, вердикту и статусу анализа
+- **Веб-интерфейс:** SPA с кавайным дизайном, фильтрацией по категориям, вердикту и статусу анализа
+- **Аутентификация:** регистрация и вход по email, JWT-токен в localStorage, сессия не истекает
+- **Настройки LLM через UI:** управление API-ключами и моделями для каждого провайдера
+  прямо из браузера, с проверкой подключения (Test Connection)
 - **Без Playwright:** парсинг статического HTML через httpx + BeautifulSoup, без браузера
+- **Коллектор исторических материалов** (`collectors/`): собирает фото/картины/чертежи
+  по названию объекта (Wikimedia Commons, Polona.pl, Europeana, NAC и др.) и
+  готовит три версии файлов (original / optimized 2048px / thumbnail 512px)
+  для AR-приложения Geo-History Spots
+- **Дорожная карта** и статус развития — в [ROADMAP.md](ROADMAP.md)
 
 ## Быстрый старт
 
@@ -43,9 +53,11 @@ pip install -r requirements.txt
 # 4. Настроить окружение
 cp .env.example .env
 # отредактировать .env (указать ключи API при необходимости)
+# ОБЯЗАТЕЛЬНО: сгенерируйте JWT_SECRET:
+#   python3 -c "import secrets; print(secrets.token_urlsafe(32))"
 
 # 5. Запустить
-uvicorn main:app --port 8099 --host 0.0.0.0
+uvicorn main:app --port 8099 --host 127.0.0.1
 ```
 
 Открой `http://localhost:8099` в браузере.
@@ -74,39 +86,55 @@ uvicorn main:app --port 8099 --host 0.0.0.0
 | `GEMINI_API_KEY` | — | API-ключ Google Gemini |
 | `GEMINI_MODEL` | `gemini-2.5-flash` | Модель Gemini |
 | `DB_PATH` | `radar.db` | Путь к SQLite базе |
+| `ASSETS_ROOT` | `./assets` | Корень хранения файлов коллектора (`archive/ production/ thumbnails/`) |
+| `EUROPEANA_API_KEY` | — | Ключ Europeana API (для источника `europeana`) |
+| `JWT_SECRET` | — | **Обязательно!** Секретный ключ для JWT (минимум 32 символа) |
 
 ## API эндпоинты
+
+### Публичные (без аутентификации)
 
 | Метод | Путь | Описание |
 |---|---|---|
 | `GET` | `/` | SPA фронтенд |
 | `POST` | `/api/refresh` | Запустить только парсинг (без анализа) |
-| `POST` | `/api/analyze?provider=&force=` | Запустить анализ (параметр `force=true` сбрасывает и переанализирует всё) |
+| `POST` | `/api/analyze?provider=&force=` | Запустить анализ |
 | `GET` | `/api/jobs?category=&verdict=&analyzed=` | Список заказов с фильтрацией |
 | `GET` | `/api/stats` | Статистика + статус задач + доступность провайдеров |
 | `GET` | `/api/status` | Статус фоновых задач (парсинг / анализ) |
-| `GET` | `/api/settings` | Текущие настройки |
+| `GET` | `/api/settings` | Текущие настройки (key-value) |
 | `POST` | `/api/settings` | Обновить настройки (`{"provider": "deepseek"}`) |
 | `GET` | `/api/log` | Полный лог последнего запуска |
+| `POST` | `/api/collect` | Запустить сбор исторических материалов (`{"object_name": "...", "sources": [...], "limit": N}`) |
+| `GET` | `/api/collect/status/{task_id}` | Статус фоновой задачи сбора |
+| `GET` | `/api/objects` | Список всех исторических объектов |
+| `GET` | `/api/objects/{object_id}/assets` | Ассеты объекта (`?source=&year=`) |
+| `GET` | `/api/assets?object_id=` | Список собранных ассетов объекта (совместимость) |
+| `GET` | `/api/assets/download/{asset_id}` | Скачать версию файла (`?version=thumbnail\|optimized\|original`) |
+| `GET` | `/api/assets/random` | Случайные ассеты (`?object_id=&limit=10`) |
 
-### Параметры `/api/analyze`
+### Аутентификация
 
-- `provider` — один из: `ollama`, `deepseek`, `gemini`. Если не указан — используется
-  сохранённая настройка (из БД или `.env`)
-- `force` — `true` или `false`. При `true` все существующие вердикты сбрасываются,
-  и анализ запускается заново для всех заказов
+| Метод | Путь | Описание |
+|---|---|---|
+| `POST` | `/api/register` | Регистрация нового пользователя (email + password) |
+| `POST` | `/api/login` | Вход, возвращает JWT-токен |
+| `GET` | `/api/me` | Данные текущего пользователя (требует токен) |
+| `POST` | `/api/logout` | Выход (клиент удаляет токен) |
 
-### Параметры `/api/jobs`
+### Защищённые (требуют JWT в заголовке `Authorization: Bearer <token>`)
 
-- `category` — фильтр по категории: `all`, `Web App`, `Mobile App`, `CMS`, `Other IT`
-- `verdict` — фильтр по вердикту: `all`, `TAKE`, `SKIP`, `UNKNOWN`
-- `analyzed` — фильтр по статусу анализа: `all`, `0` (непроанализированные), `1` (проанализированные)
+| Метод | Путь | Описание |
+|---|---|---|
+| `GET` | `/api/user/settings` | Настройки LLM пользователя (с маскировкой ключей) |
+| `PUT` | `/api/user/settings` | Обновить настройки LLM пользователя |
+| `POST` | `/api/test-connection` | Проверить подключение к провайдеру |
 
 ## Использование
 
 ### 1. Парсинг
 
-Нажми **«Запустить парсинг»** — парсеры пройдут по всем 6 площадкам, соберут новые заказы
+Нажми **«Запустить парсинг»** — парсеры пройдут по всем 14 площадкам, соберут новые заказы
 и сохранят в БД. Анализ **не запускается** — это быстрая операция (секунды).
 
 ### 2. Выбор анализатора
@@ -125,11 +153,19 @@ uvicorn main:app --port 8099 --host 0.0.0.0
 выбранной LLM. Анализ работает **пачками по 10 параллельно** — это ускоряет обработку
 сотен заказов. Прогресс отображается в реальном времени.
 
-### 4. Переанализ
+### 4. Настройки LLM (требуется регистрация)
 
-Нажми **«Переанализировать всё»** — появится подтверждение, после которого все старые
-вердикты сбрасываются, и запускается полный анализ заново. Удобно, чтобы попробовать
-разных провайдеров или после обновления промпта.
+Перейдите на вкладку **«Настройки»**. Если вы не авторизованы — зарегистрируйтесь
+или войдите. После входа вы сможете:
+
+- Управлять API-ключами для DeepSeek и Gemini
+- Выбирать модель для каждого провайдера
+- Настраивать модель и хост для Ollama
+- Проверять подключение к каждому провайдеру кнопкой **Test**
+- Сохранять настройки кнопкой **«Сохранить настройки»**
+
+Настройки применяются сразу — анализатор использует новые ключи и модели
+при следующем запуске анализа.
 
 ### 5. Просмотр
 
@@ -138,39 +174,57 @@ uvicorn main:app --port 8099 --host 0.0.0.0
   оценку времени, источник и причину вердикта от LLM
 - Фильтры в тулбаре: по вердикту, по статусу анализа, по категории
 
-## Категории заказов
-
-| Категория | Примеры технологий |
-|---|---|
-| **Web App** | React, Vue, Angular, Next.js, Django, FastAPI, Laravel, HTML/CSS |
-| **Mobile App** | Android, iOS, Flutter, React Native, Swift, Kotlin |
-| **CMS** | WordPress, Drupal, MODX, Bitrix, Joomla, Magento, Shopify, Wix |
-| **Other IT** | Всё остальное (тестирование, девопс, администрирование и т.п.) |
-
-Категория определяется автоматически по ключевым словам в заголовке и описании заказа.
-
 ## Архитектура
 
 ```
 freelance-radar/
 ├── main.py              # FastAPI приложение + роуты
+├── auth.py              # JWT-функции и хеширование паролей
 ├── database.py          # SQLite (aiosqlite), upsert, настройки, миграции
-├── models.py            # Job, Category, Verdict — модели данных
+├── models.py            # Job, Category, Verdict, CollectRequest — модели данных
 ├── analyzer.py          # BaseAnalyzer + реализации: Ollama, DeepSeek, Gemini
+├── collectors/          # Сбор исторических материалов (не зависит от scrapers/)
+│   ├── __init__.py      # COLLECTOR_REGISTRY — реестр источников
+│   ├── base_collector.py# BaseCollector (наследует scrapers.base.BaseScraper)
+│   ├── wikimedia.py     # Wikimedia Commons (MediaWiki API)
+│   ├── polona.py        # Polona.pl (поиск + страницы объектов)
+│   ├── europeana.py     # Europeana.eu (REST API, EUROPEANA_API_KEY)
+│   ├── look_and_learn.py# Look and Learn (поисковая выдача)
+│   ├── nac.py           # Narodowe Archiwum Cyfrowe
+│   ├── um_warszawa.py   # Исторический портал Варшавы (экспериментальный)
+│   ├── optimizer.py     # MediaOptimizer: original/optimized/thumbnail (Pillow)
+│   ├── manager.py       # CollectorManager: запуск, БД, оптимизация в assets/
+│   └── models.py        # Pydantic-модели ответов API
+├── assets/              # archive/ production/ thumbnails по объектам
+├── test_collector.py    # Тест коллектора (CLI: --query, --limit, --sources)
 ├── scrapers/
-│   ├── __init__.py      # Реестр всех скраперов
+│   ├── __init__.py      # Реестр всех скраперов (ALL_SCRAPERS, 14 площадок)
 │   ├── base.py          # BaseScraper, детектор категорий, парсинг бюджета
-│   ├── oferia.py        # Oferia.pl (3 категории, session-based)
-│   ├── useme.py         # Useme.com (3 категории)
-│   ├── workconnect.py   # WorkConnect.app (3 категории)
-│   ├── zleca.py         # Zleca.pl (3 категории)
+│   ├── oferia.py        # Oferia.pl
+│   ├── useme.py         # Useme.com
+│   ├── workconnect.py   # WorkConnect.app
+│   ├── zleca.py         # Zleca.pl
 │   ├── upwork.py        # Upwork.com (listing + RSS fallback)
-│   └── toptal.py        # Toptal.com (JSON-LD + HTML links)
+│   ├── toptal.py        # Toptal.com (JSON-LD + HTML links)
+│   ├── freelancehunt.py # Freelancehunt.com
+│   ├── fixly.py         # Fixly.pl
+│   ├── freelancepl.py   # Freelance.pl
+│   ├── outwork.py       # Outwork.pl
+│   ├── freelancer.py    # Freelancer.com
+│   ├── fiverr.py        # Fiverr.com
+│   ├── gigster.py       # Gigster.com
+│   └── freelancermap.py # Freelancermap.com
+├── services/
+│   ├── __init__.py
+│   └── state.py         # AppState — датакласс состояния (парсинг/анализ/лог)
 ├── templates/
-│   └── index.html       # SPA фронтенд (HTML + CSS + Vanilla JS)
-├── start.sh             # Скрипт запуска
+│   └── index.html       # SPA фронтенд (только HTML, ~270 строк)
+├── static/
+│   ├── app.js           # Клиентская логика (заказы, аутентификация, настройки)
+│   └── styles.css       # Кавайная тема (~1678 строк, рекомендуется дефрагментация)
+├── start.sh             # Скрипт запуска (создаёт venv, запускает uvicorn)
 ├── radar.db             # SQLite БД (создаётся автоматически)
-├── requirements.txt     # Зависимости Python
+├── requirements.txt     # Зависимости Python (только нужные: httpx, fastapi и др.)
 ├── .env.example         # Шаблон конфигурации
 ├── .env                 # Конфигурация (не коммитится)
 ├── README.md            # Этот файл
@@ -190,33 +244,134 @@ freelance-radar/
 └──────────────┘     └───────────────────────┘     └──────────────┘
          ↑                        ↑                        ↑
     POST /api/refresh        POST /api/analyze       Выбор провайдера
+                                                     (Settings tab)
 ```
 
-### Компоненты
+### Безопасность
 
-**main.py** — точка входа FastAPI:
-- Фоновые задачи через `BackgroundTasks`
-- Раздельные статусы для парсинга и анализа (in-memory)
-- Логирование цветными эмодзи-префиксами
+- Пароли хешируются bcrypt
+- JWT-токены с алгоритмом HS256 (срок жизни настраивается в `auth.py`, `JWT_EXPIRE_DAYS`)
+- API-ключи хранятся в БД в открытом виде (для локального использования;
+  рекомендуется не передавать БД третьим лицам)
+- Все эндпоинты настроек и тестирования защищены JWT-аутентификацией
+- Первый зарегистрированный пользователь получает права администратора
 
-**database.py** — слой данных:
-- SQLite через `aiosqlite` (асинхронный)
-- Upsert-вставка (дубли обновляются, а не создаются заново)
-- Миграции при старте (переименование категорий и т.п.)
-- Таблица `settings` (key-value) для хранения настроек пользователя
+## Коллектор исторических материалов
 
-**analyzer.py** — абстрактный анализатор с фабрикой:
-- `BaseAnalyzer` — общий интерфейс
-- `OllamaAnalyzer` — локальная Ollama (chat/generate fallback)
-- `DeepSeekAnalyzer` — OpenAI-совместимый API
-- `GeminiAnalyzer` — Google Generative AI API
-- Фабрика `get_analyzer(provider)` + проверки доступности
+Модуль `collectors/` собирает исторические визуальные материалы (фотографии,
+картины, литографии, чертежи, карты) по названию объекта из открытых источников
+и готовит их для мобильного AR-приложения Geo-History Spots. Работает независимо
+от парсинга заказов (`scrapers/`), но переиспользует `BaseScraper`, `httpx`,
+`BeautifulSoup` и `database.py`.
 
-**scrapers/** — парсеры площадок:
-- Каждый наследует `BaseScraper`
-- Случайный User-Agent, задержки 1–3 с
-- Автоопределение категорий через keyword-matching
-- Парсинг бюджета из текста (диапазоны `500-1000 zł`)
+### Источники
+
+| Источник | Ключ | Метод | Статус |
+|---|---|---|---|
+| Wikimedia Commons | `wikimedia` | MediaWiki API (категории + поиск) | ✅ работает |
+| Polona.pl | `polona` | HTML (поиск с фильтром category:photographs) | ⚠️ частично — SPA, SSR не всегда отдаёт результаты |
+| Europeana.eu | `europeana` | Официальный REST API (нужен ключ) | ✅ работает (при наличии `EUROPEANA_API_KEY`) |
+| Look and Learn | `lookandlearn` | HTML (поисковая выдача) | ⚠️ защищён Cloudflare — часто возвращает пусто |
+| NAC (nac.gov.pl) | `nac` | HTML (поиск) | ⚠️ обычно защищён Incapsula — запросы отклоняются |
+| Исторический портал Варшавы | `um_warszawa` | HTML (портал исторических карт) | 🧪 экспериментальный (JS-приложение) |
+
+### Оптимизация медиа-файлов
+
+Каждый скачанный файл проходит через `MediaOptimizer` (Pillow) и даёт **три версии**:
+
+| Версия | Каталог | Размер | Формат |
+|---|---|---|---|
+| Оригинал | `assets/archive/<city>/<slug>/` | без изменений | как скачан (jpg/png/pdf/usdz/…) |
+| Optimized (для AR) | `assets/production/<city>/<slug>/` | ≤ **2048 px** по большей стороне | JPEG, качество **85** |
+| Thumbnail (превью в UI) | `assets/thumbnails/<city>/<slug>/` | ≤ **512 px** по большей стороне | JPEG, качество **75** |
+
+Имя файла: `<год>_<id>_original.<ext>` / `_optimized.jpg` / `_thumb.jpg`.
+Не-изображения (PDF, USDZ, MP4) сохраняются только в оригинале. Pillow-операции
+выполняются через `asyncio.to_thread`, чтобы не блокировать событийный цикл.
+При повторном сборе файлы не качаются заново (по `file_url` в БД).
+
+### Получение API-ключей
+
+- **Europeana**: бесплатно на https://pro.europeana.eu/page/get-api-key → вписать в
+  `.env` как `EUROPEANA_API_KEY`. Без ключа источник пропускается с предупреждением.
+- Остальные источники ключей не требуют.
+
+### Переменные окружения
+
+```env
+# корень хранения: archive/ production/ thumbnails/
+ASSETS_ROOT=./assets
+EUROPEANA_API_KEY=your_key_here
+LOC_API_KEY=your_key_here   # зарезервировано для loc.gov
+```
+
+### Запуск
+
+```bash
+source .venv/bin/activate
+
+# CLI-тест (все источники, лимит 5)
+python test_collector.py
+
+# Только Wikimedia, свой запрос и лимит (город можно задать явно)
+python test_collector.py --query "Warsaw Old Town" --sources wikimedia --limit 10 --city warsaw
+```
+
+Пример результата оптимизации (тест «Palac Kultury i Nauki», source `wikimedia`):
+
+```text
+assets/archive/warsaw/palac_kultury_i_nauki/2013_9_original.jpg   — 4909×3186, 4.8 MB
+assets/production/warsaw/palac_kultury_i_nauki/2013_9_optimized.jpg — 2048×1329, 646 KB
+assets/thumbnails/warsaw/palac_kultury_i_nauki/2013_9_thumb.jpg    — 512×332, 36 KB
+```
+
+### API
+
+```bash
+# Запустить сбор (фоново, возвращает task_id)
+curl -X POST http://localhost:8099/api/collect \
+  -H 'Content-Type: application/json' \
+  -d '{"object_name": "Zamek Królewski", "sources": ["wikimedia", "polona", "europeana"], "limit": 50, "city": "Warsaw", "latitude": 52.2476, "longitude": 21.0141}'
+
+# Статус задачи: {"status": "running|done|error", "collected": N, "downloaded": M, "errors": [...]}
+curl http://localhost:8099/api/collect/status/<task_id>
+
+# Список исторических объектов
+curl http://localhost:8099/api/objects
+
+# Ассеты объекта с фильтрами (источник/год)
+curl "http://localhost:8099/api/objects/1/assets?source=wikimedia&year=1939"
+
+# Скачать версию файла (?version=thumbnail|optimized|original, по умолчанию optimized)
+curl -o photo.jpg "http://localhost:8099/api/assets/download/42?version=optimized"
+
+# Случайные ассеты для превью на карте
+curl "http://localhost:8099/api/assets/random?object_id=1&limit=10"
+```
+
+`GET /api/assets?object_id=1` (без `objects` в пути) сохранён для обратной
+совместимости.
+
+### Структура модуля
+
+```
+collectors/
+├── __init__.py         # COLLECTOR_REGISTRY — реестр источников (ключ → класс)
+├── base_collector.py   # BaseCollector (наследует scrapers.base.BaseScraper)
+├── wikimedia.py        # WikimediaCollector
+├── polona.py           # PolonaCollector
+├── europeana.py        # EuropeanaCollector (REST API, EUROPEANA_API_KEY)
+├── look_and_learn.py   # LookAndLearnCollector
+├── nac.py              # NacCollector
+├── um_warszawa.py      # UmWarszawaCollector (экспериментальный)
+├── optimizer.py        # MediaOptimizer — три версии файла (Pillow)
+├── manager.py          # CollectorManager — оркестрация сбора
+└── models.py           # Pydantic-модели ответов API
+```
+
+Таблицы SQLite: `historical_objects` (объекты + `slug`, `city`, координаты),
+`historical_assets` (ассеты + пути к трём версиям, размеры, статус `downloaded`/`error`).
+
 
 ## Разработка
 
@@ -235,11 +390,12 @@ python3 -c "import py_compile; py_compile.compile('main.py', doraise=True); prin
 
 | Компонент | Технология |
 |---|---|
-| **Веб-фреймворк** | FastAPI + uvicorn |
+| **Веб-фреймворк** | FastAPI + uvicorn (через httpx, без SDK провайдеров) |
 | **База данных** | SQLite (aiosqlite) |
+| **Аутентификация** | JWT (python-jose) + bcrypt |
 | **Фронтенд** | HTML + CSS + Vanilla JS (без фреймворков) |
 | **Парсинг** | httpx + BeautifulSoup4 + lxml |
-| **LLM** | Ollama / DeepSeek API / Gemini API |
+| **LLM** | Ollama / DeepSeek API / Gemini API (все через httpx) |
 | **Асинхронность** | asyncio, BackgroundTasks |
 
 ## Дорожная карта

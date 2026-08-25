@@ -1,7 +1,7 @@
 from bs4 import BeautifulSoup
 
-from models import Job
-from scrapers.base import BaseScraper, detect_category, make_id, parse_budget
+from models import Job, MAX_DESC_LENGTH
+from scrapers.base import BaseScraper, parse_budget
 
 URLS = [
     "https://zleca.pl/zlecenia/programowanie-strony-internetowe",
@@ -16,7 +16,6 @@ class ZlecaScraper(BaseScraper):
 
     async def scrape(self) -> list[Job]:
         jobs: list[Job] = []
-        seen: set[str] = set()
 
         for url in URLS:
             resp = await self._get(url)
@@ -24,10 +23,8 @@ class ZlecaScraper(BaseScraper):
                 continue
             soup = BeautifulSoup(resp.text, "lxml")
 
-            # Confirmed structure: ol.list-panels > li > div.text-col > h3.title > a
             items = soup.select("ol.list-panels li")
             if not items:
-                # fallback
                 items_raw = soup.select("a[href*='/zlecenie']")
                 for link in items_raw:
                     title = link.get_text(strip=True)
@@ -35,14 +32,11 @@ class ZlecaScraper(BaseScraper):
                     if not title or len(title) < 8:
                         continue
                     job_url = href if href.startswith("http") else BASE + href
-                    if job_url in seen:
+                    if job_url in self.seen:
                         continue
-                    seen.add(job_url)
-                    jobs.append(Job(
-                        id=make_id(title, self.source_name),
-                        title=title, description="", url=job_url,
-                        source=self.source_name,
-                        category=detect_category(title, ""),
+                    self.seen.add(job_url)
+                    jobs.append(self._make_job(
+                        title=title, url=job_url,
                     ))
                 continue
 
@@ -53,28 +47,19 @@ class ZlecaScraper(BaseScraper):
                 title = title_el.get_text(strip=True)
                 href = title_el.get("href", "")
                 job_url = href if href.startswith("http") else BASE + href
-                if not title or job_url in seen:
+                if not title or job_url in self.seen:
                     continue
-                seen.add(job_url)
+                self.seen.add(job_url)
 
                 desc_el = li.select_one("p.description")
-                description = desc_el.get_text(" ", strip=True)[:800] if desc_el else ""
+                description = desc_el.get_text(" ", strip=True)[:MAX_DESC_LENGTH] if desc_el else ""
 
-                # Date is in span.from-to — contains city + date text
                 date_el = li.select_one("span.from-to")
                 posted_at = date_el.get_text(" ", strip=True)[:40] if date_el else ""
 
-                # Budget not in list view — skip detail fetch for now (too slow)
-                jobs.append(Job(
-                    id=make_id(title, self.source_name),
-                    title=title,
-                    description=description,
-                    url=job_url,
-                    source=self.source_name,
-                    category=detect_category(title, description),
-                    budget_raw="",
+                jobs.append(self._make_job(
+                    title=title, url=job_url, description=description,
                     posted_at=posted_at,
                 ))
 
-        print(f"[zleca] scraped {len(jobs)} jobs")
         return jobs
